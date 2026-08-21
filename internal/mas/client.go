@@ -100,6 +100,10 @@ type CreatePersonalSessionRequest struct {
 	ExpiresIn   *uint32 `json:"expires_in,omitempty"`
 }
 
+type deactivateUserRequest struct {
+	SkipErase bool `json:"skip_erase,omitempty"`
+}
+
 type resource[T any] struct {
 	Type       string `json:"type"`
 	ID         string `json:"id"`
@@ -171,6 +175,19 @@ func (c *Client) RevokePersonalSession(ctx context.Context, id string) error {
 		return err
 	}
 	return c.doJSON(ctx, http.MethodPost, endpoint, nil, nil)
+}
+
+// DeactivateUser deactivates a MAS user and returns the updated resource.
+func (c *Client) DeactivateUser(ctx context.Context, id string, skipErase bool) (User, error) {
+	endpoint, err := resourceEndpoint(c.config.UsersURL, id, "/deactivate")
+	if err != nil {
+		return User{}, err
+	}
+	var response singleResponse[UserAttributes]
+	if err := c.doJSON(ctx, http.MethodPost, endpoint, deactivateUserRequest{SkipErase: skipErase}, &response); err != nil {
+		return User{}, err
+	}
+	return User{Type: response.Data.Type, ID: response.Data.ID, Attributes: response.Data.Attributes}, nil
 }
 
 func (c *Client) doJSON(ctx context.Context, method, endpoint string, requestBody any, responseBody any) error {

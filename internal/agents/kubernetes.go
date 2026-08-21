@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -43,10 +44,19 @@ func NewKubernetesBackend(client kubernetes.Interface, namespace, prefix string)
 	if prefix == "" {
 		return nil, errors.New("Kubernetes Secret name prefix is required")
 	}
+	if errs := validation.IsDNS1123Subdomain(prefix); len(errs) > 0 {
+		return nil, fmt.Errorf("Kubernetes Secret name prefix is invalid: %s", errs[0])
+	}
+	if len(prefix)+1+63 > 253 {
+		return nil, errors.New("Kubernetes Secret name prefix is too long")
+	}
 	return &KubernetesBackend{client: client, namespace: namespace, prefix: prefix, now: time.Now}, nil
 }
 
 func (b *KubernetesBackend) GetAgent(ctx context.Context, name string) (SecretRecord, error) {
+	if _, err := validateAgentName(name); err != nil {
+		return SecretRecord{}, err
+	}
 	secret, err := b.client.CoreV1().Secrets(b.namespace).Get(ctx, b.secretName(name), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return SecretRecord{}, ErrNotFound
@@ -73,6 +83,9 @@ func (b *KubernetesBackend) CreateAgent(ctx context.Context, record SecretRecord
 }
 
 func (b *KubernetesBackend) UpdateAgent(ctx context.Context, record SecretRecord) error {
+	if _, err := validateAgentName(record.AgentName); err != nil {
+		return err
+	}
 	secrets := b.client.CoreV1().Secrets(b.namespace)
 	current, err := secrets.Get(ctx, b.secretName(record.AgentName), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -93,6 +106,20 @@ func (b *KubernetesBackend) UpdateAgent(ctx context.Context, record SecretRecord
 	return nil
 }
 
+func (b *KubernetesBackend) DeleteAgent(ctx context.Context, name string) error {
+	if _, err := validateAgentName(name); err != nil {
+		return err
+	}
+	err := b.client.CoreV1().Secrets(b.namespace).Delete(ctx, b.secretName(name), metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("delete agent Secret: %w", err)
+	}
+	return nil
+}
+
 func (b *KubernetesBackend) ListAgents(ctx context.Context) ([]SecretRecord, error) {
 	req, err := labels.NewRequirement(agentLabel, selection.Exists, nil)
 	if err != nil {
@@ -106,6 +133,9 @@ func (b *KubernetesBackend) ListAgents(ctx context.Context) ([]SecretRecord, err
 	}
 	result := make([]SecretRecord, 0, len(list.Items))
 	for i := range list.Items {
+		if !strings.HasPrefix(list.Items[i].Name, b.prefix+"-") || list.Items[i].Type != corev1.SecretType(secretType) {
+			continue
+		}
 		record, err := recordFromSecret(&list.Items[i])
 		if err != nil {
 			return nil, err
@@ -120,11 +150,26 @@ func (b *KubernetesBackend) secretName(agentName string) string {
 }
 
 func (b *KubernetesBackend) secretFromRecord(record SecretRecord) (*corev1.Secret, error) {
-	if record.AgentName == "" || record.MASUserID == "" || record.SessionID == "" {
-		return nil, errors.New("agent Secret requires agent, MAS user, and session IDs")
+	if _, err := validateAgentName(record.AgentName); err != nil {
+		return nil, err
+	}
+	if record.DisplayName == "" || len(record.DisplayName) > 256 {
+		return nil, errors.New("agent Secret display name must be 1-256 bytes")
+	}
+	if record.MASUserID == "" {
+		return nil, errors.New("agent Secret requires a MAS user ID")
 	}
 	if record.Generation < 1 {
 		return nil, errors.New("agent Secret generation must be positive")
+	}
+	if record.Status != StatusActive && record.Status != StatusRevoked && record.Status != StatusDeactivated {
+		return nil, errors.New("agent Secret status is invalid")
+	}
+	if record.Status == StatusActive && (record.SessionID == "" || record.AccessToken == "") {
+		return nil, errors.New("active agent Secret requires session and access token")
+	}
+	if record.Status != StatusActive && (record.SessionID != "" || record.AccessToken != "") {
+		return nil, errors.New("inactive agent Secret must not contain session or access token")
 	}
 	metadata := map[string]string{
 		secretPartOfLabel:                "matrix-agent-manager",
@@ -154,7 +199,23 @@ func recordFromSecret(secret *corev1.Secret) (SecretRecord, error) {
 	if secret == nil || secret.Labels[secretPartOfLabel] != "matrix-agent-manager" || secret.Labels[agentLabel] == "" {
 		return SecretRecord{}, errors.New("Secret is not a Matrix Agent Manager record")
 	}
+	if secret.Type != corev1.SecretType(secretType) {
+		return SecretRecord{}, errors.New("Secret has an unexpected type")
+	}
 	data := secret.Data
+	agentName := string(data["agent-name"])
+	if agentName == "" || secret.Labels[agentLabel] != agentName {
+		return SecretRecord{}, errors.New("agent Secret has inconsistent agent name")
+	}
+	if _, err := validateAgentName(agentName); err != nil {
+		return SecretRecord{}, err
+	}
+	if string(data["mas-user-id"]) == "" || string(data["display-name"]) == "" {
+		return SecretRecord{}, errors.New("agent Secret is missing required identity metadata")
+	}
+	if len(data["display-name"]) > 256 {
+		return SecretRecord{}, errors.New("agent Secret display name exceeds 256 bytes")
+	}
 	generation, err := strconv.Atoi(string(data["generation"]))
 	if err != nil || generation < 1 {
 		return SecretRecord{}, errors.New("agent Secret has invalid generation")
@@ -168,11 +229,17 @@ func recordFromSecret(secret *corev1.Secret) (SecretRecord, error) {
 		return SecretRecord{}, errors.New("agent Secret has invalid updated-at")
 	}
 	status := Status(string(data["status"]))
-	if status != StatusActive && status != StatusDeactivated {
+	if status != StatusActive && status != StatusRevoked && status != StatusDeactivated {
 		return SecretRecord{}, errors.New("agent Secret has invalid status")
 	}
+	if status == StatusActive && (string(data["session-id"]) == "" || string(data["access-token"]) == "") {
+		return SecretRecord{}, errors.New("active agent Secret is missing session or access token")
+	}
+	if status != StatusActive && (string(data["session-id"]) != "" || string(data["access-token"]) != "") {
+		return SecretRecord{}, errors.New("inactive agent Secret contains token material")
+	}
 	return SecretRecord{
-		AgentName:   string(data["agent-name"]),
+		AgentName:   agentName,
 		DisplayName: string(data["display-name"]),
 		MASUserID:   string(data["mas-user-id"]),
 		SessionID:   string(data["session-id"]),

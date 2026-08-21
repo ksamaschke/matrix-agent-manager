@@ -120,6 +120,13 @@ type accessTokenResponse struct {
 	ExpiresIn   int    `json:"expires_in"`
 }
 
+type paginatedSessionsResponse struct {
+	Data  []resource[PersonalSessionAttributes] `json:"data"`
+	Links struct {
+		Next string `json:"next"`
+	} `json:"links"`
+}
+
 // NewClient validates the configured trust boundaries before creating a client.
 func NewClient(config ClientConfig, readSecret SecretReader) (*Client, error) {
 	for name, raw := range map[string]string{
@@ -178,6 +185,46 @@ func (c *Client) RevokePersonalSession(ctx context.Context, id string) error {
 	return c.doJSON(ctx, http.MethodPost, endpoint, nil, nil)
 }
 
+// ListPersonalSessions lists personal sessions owned by the given MAS user.
+// It follows only MAS-provided same-origin next links and bounds traversal.
+func (c *Client) ListPersonalSessions(ctx context.Context, ownerUserID string) ([]PersonalSession, error) {
+	if strings.TrimSpace(ownerUserID) == "" || strings.ContainsAny(ownerUserID, "/?#") {
+		return nil, errors.New("MAS owner user ID is invalid")
+	}
+	endpoint, err := url.Parse(c.config.PersonalSessionsURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse MAS sessions URL: %w", err)
+	}
+	query := endpoint.Query()
+	query.Set("filter[actor_user]", ownerUserID)
+	query.Set("filter[status]", "active")
+	query.Set("page[first]", "100")
+	endpoint.RawQuery = query.Encode()
+	result := make([]PersonalSession, 0)
+	for page := 0; page < 100 && endpoint != nil; page++ {
+		var response paginatedSessionsResponse
+		if err := c.doJSON(ctx, http.MethodGet, endpoint.String(), nil, &response); err != nil {
+			return nil, err
+		}
+		for _, item := range response.Data {
+			result = append(result, PersonalSession{Type: item.Type, ID: item.ID, Attributes: item.Attributes})
+		}
+		if response.Links.Next == "" {
+			return result, nil
+		}
+		next, err := url.Parse(response.Links.Next)
+		if err != nil {
+			return nil, errors.New("MAS pagination link is invalid")
+		}
+		next = endpoint.ResolveReference(next)
+		if next.Scheme != endpoint.Scheme || next.Host != endpoint.Host || next.User != nil {
+			return nil, errors.New("MAS pagination link is not same-origin")
+		}
+		endpoint = next
+	}
+	return nil, errors.New("MAS session pagination exceeded safety limit")
+}
+
 // DeactivateUser deactivates a MAS user and returns the updated resource.
 func (c *Client) DeactivateUser(ctx context.Context, id string, skipErase bool) (User, error) {
 	endpoint, err := resourceEndpoint(c.config.UsersURL, id, "/deactivate")
@@ -189,6 +236,13 @@ func (c *Client) DeactivateUser(ctx context.Context, id string, skipErase bool) 
 		return User{}, err
 	}
 	return User{Type: response.Data.Type, ID: response.Data.ID, Attributes: response.Data.Attributes}, nil
+}
+
+// DeleteUser deactivates a user and requests homeserver data erasure.
+// MAS exposes deactivation rather than a separate hard-delete operation.
+func (c *Client) DeleteUser(ctx context.Context, id string) error {
+	_, err := c.DeactivateUser(ctx, id, false)
+	return err
 }
 
 func (c *Client) doJSON(ctx context.Context, method, endpoint string, requestBody any, responseBody any) error {

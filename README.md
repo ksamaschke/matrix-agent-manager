@@ -10,15 +10,22 @@ roles, and secret backends are configured by the deployment environment.
 
 ## Status
 
-The repository currently contains the security-conscious runtime foundation:
+The repository contains a tested API/UI MVP for administrative Matrix agent
+lifecycle management:
 
-- typed environment configuration;
-- fail-closed production validation;
-- health/readiness endpoints;
-- no production hostnames, credentials, or provider-specific routes.
+- generic OIDC login with PKCE, state, nonce, issuer, audience, signature, and
+  role validation;
+- CSRF-protected browser mutations;
+- named agent creation and metadata-only listing;
+- one-time token delivery on creation and rotation;
+- token rotation, explicit revocation, deactivation, and removal;
+- MAS user/session cleanup with bounded active-session enumeration;
+- Kubernetes Secret persistence with namespace-scoped RBAC;
+- fail-closed production configuration and an immutable-container Helm chart.
 
-Agent lifecycle APIs, the operator, and the UI are planned and will be added
-behind tests and independent security review.
+The product remains deployment-neutral. Hostnames, Keycloak details, MAS
+endpoints, namespaces, and Secret references belong in deployment overlays.
+The optional operator/CRD is not part of this API-based MVP.
 
 ## Local development
 

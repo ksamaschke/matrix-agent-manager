@@ -146,7 +146,7 @@ func New(ctx context.Context, config Config) (*Authenticator, error) {
 			ClientSecret: clientSecret,
 			Endpoint:     provider.Endpoint(),
 			RedirectURL:  config.RedirectURL,
-			Scopes:       []string{oidc.ScopeOpenID, "profile"},
+			Scopes:       []string{oidc.ScopeOpenID, "profile", "roles"},
 		},
 		codec:         config.Codec,
 		stateStore:    config.StateStore,
@@ -276,13 +276,26 @@ func (a *Authenticator) openState(token string) (statePayload, error) {
 }
 
 func rolesFromClaims(claims map[string]any, claimName string) ([]string, error) {
-	value, ok := claims[claimName]
-	if !ok {
-		return nil, fmt.Errorf("OIDC role claim %q is missing", claimName)
+	var value any = claims
+	for _, part := range strings.Split(claimName, ".") {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("OIDC role claim %q is not an object path", claimName)
+		}
+		value, ok = object[part]
+		if !ok {
+			return nil, fmt.Errorf("OIDC role claim %q is missing", claimName)
+		}
 	}
 	items, ok := value.([]any)
 	if !ok {
 		return nil, fmt.Errorf("OIDC role claim %q must be an array", claimName)
+	}
+	if len(items) == 0 {
+		return []string{}, nil
+	}
+	if value == nil {
+		return nil, fmt.Errorf("OIDC role claim %q is missing", claimName)
 	}
 	roles := make([]string, 0, len(items))
 	for _, item := range items {

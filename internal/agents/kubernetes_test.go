@@ -70,6 +70,50 @@ func TestKubernetesBackendRejectsMalformedRecord(t *testing.T) {
 	}
 }
 
+func TestKubernetesBackendDeleteAgent(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	backend, err := NewKubernetesBackend(client, "agent-manager", "matrix-agent")
+	if err != nil {
+		t.Fatalf("NewKubernetesBackend() error = %v", err)
+	}
+	record := SecretRecord{AgentName: "codex", DisplayName: "Codex", MASUserID: "user-codex", SessionID: "session-codex", AccessToken: "token", Generation: 1, Status: StatusActive, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := backend.CreateAgent(context.Background(), record); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+	if err := backend.DeleteAgent(context.Background(), "codex"); err != nil {
+		t.Fatalf("DeleteAgent() error = %v", err)
+	}
+	if _, err := backend.GetAgent(context.Background(), "codex"); err != ErrNotFound {
+		t.Fatalf("GetAgent() after delete = %v, want ErrNotFound", err)
+	}
+	if err := backend.DeleteAgent(context.Background(), "codex"); err != ErrNotFound {
+		t.Fatalf("second DeleteAgent() = %v, want ErrNotFound", err)
+	}
+}
+
+func TestKubernetesBackendRoundTripsInactiveRecordWithoutTokenMaterial(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	backend, err := NewKubernetesBackend(client, "agent-manager", "matrix-agent")
+	if err != nil {
+		t.Fatalf("NewKubernetesBackend() error = %v", err)
+	}
+	now := time.Now().UTC()
+	record := SecretRecord{
+		AgentName: "codex", DisplayName: "Codex", MASUserID: "user-codex",
+		Generation: 2, Status: StatusRevoked, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := backend.CreateAgent(context.Background(), record); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+	got, err := backend.GetAgent(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+	if got.Status != StatusRevoked || got.AccessToken != "" || got.SessionID != "" {
+		t.Fatalf("inactive record = %+v", got)
+	}
+}
+
 func TestMarshalMetadataDoesNotContainToken(t *testing.T) {
 	payload, err := MarshalMetadata(SecretRecord{AgentName: "codex", AccessToken: "synthetic-token", Status: StatusActive, Generation: 1})
 	if err != nil {

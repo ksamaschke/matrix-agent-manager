@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/ksamaschke/matrix-agent-manager/internal/agents"
@@ -33,7 +32,7 @@ func main() {
 	if err != nil {
 		fatal("read session key", err)
 	}
-	codec, err := session.NewKey(strings.TrimSpace(string(sessionKey)), time.Now)
+	codec, err := session.NewKey(string(sessionKey), time.Now)
 	if err != nil {
 		fatal("create session codec", err)
 	}

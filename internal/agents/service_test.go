@@ -36,6 +36,16 @@ func (f *fakeMAS) CreatePersonalSession(_ context.Context, request mas.CreatePer
 	return session, nil
 }
 
+func (f *fakeMAS) ListPersonalSessions(_ context.Context, owner string) ([]mas.PersonalSession, error) {
+	result := make([]mas.PersonalSession, 0)
+	for _, session := range f.sessions {
+		if session.Attributes.ActorUserID == owner {
+			result = append(result, session)
+		}
+	}
+	return result, nil
+}
+
 func (f *fakeMAS) RevokePersonalSession(_ context.Context, id string) error {
 	f.revoked = append(f.revoked, id)
 	return nil
@@ -44,6 +54,11 @@ func (f *fakeMAS) RevokePersonalSession(_ context.Context, id string) error {
 func (f *fakeMAS) DeactivateUser(_ context.Context, id string, _ bool) (mas.User, error) {
 	f.deactivated = append(f.deactivated, id)
 	return mas.User{Type: "user", ID: id}, nil
+}
+
+func (f *fakeMAS) DeleteUser(_ context.Context, id string) error {
+	f.deactivated = append(f.deactivated, id)
+	return nil
 }
 
 type memorySecrets struct {
@@ -80,6 +95,13 @@ func (m *memorySecrets) UpdateAgent(_ context.Context, record SecretRecord) erro
 		return ErrNotFound
 	}
 	m.agents[record.AgentName] = record
+	return nil
+}
+func (m *memorySecrets) DeleteAgent(_ context.Context, name string) error {
+	if _, ok := m.agents[name]; !ok {
+		return ErrNotFound
+	}
+	delete(m.agents, name)
 	return nil
 }
 func (m *memorySecrets) ListAgents(_ context.Context) ([]SecretRecord, error) {
@@ -193,5 +215,29 @@ func TestAgentNameMatchesKubernetesLabelConstraints(t *testing.T) {
 		if _, err := service.Create(context.Background(), CreateRequest{AgentName: name, DisplayName: "Invalid"}); err == nil {
 			t.Fatalf("Create() accepted invalid agent name %q", name)
 		}
+	}
+}
+
+func TestRemoveRevokesDeactivatesAndDeletesSecret(t *testing.T) {
+	service, fake, secrets := newTestService()
+	created, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	result, err := service.Remove(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
+	if result.AgentName != "codex" || result.Status != StatusDeactivated || result.OneTimeToken != "" {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(fake.revoked) != 1 || fake.revoked[0] != created.SessionID {
+		t.Fatalf("revoked = %#v", fake.revoked)
+	}
+	if len(fake.deactivated) != 1 || fake.deactivated[0] != created.MASUserID {
+		t.Fatalf("deactivated = %#v", fake.deactivated)
+	}
+	if _, err := secrets.GetAgent(context.Background(), "codex"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("secret after remove = %v, want not found", err)
 	}
 }

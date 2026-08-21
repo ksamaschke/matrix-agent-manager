@@ -44,6 +44,12 @@ func (f *fakeAgentService) Rotate(context.Context, string) (agents.Result, error
 func (f *fakeAgentService) Deactivate(context.Context, string) (agents.Result, error) {
 	return agents.Result{AgentName: "codex", Status: agents.StatusDeactivated}, nil
 }
+func (f *fakeAgentService) Revoke(context.Context, string) (agents.Result, error) {
+	return agents.Result{AgentName: "codex", Status: agents.StatusRevoked}, nil
+}
+func (f *fakeAgentService) Remove(context.Context, string) (agents.Result, error) {
+	return agents.Result{AgentName: "codex", Status: agents.StatusDeactivated}, nil
+}
 
 func newTestHTTPServer(t *testing.T, identity oidcauth.Identity) (*Server, *fakeAgentService) {
 	t.Helper()
@@ -91,6 +97,9 @@ func TestHTTPMutationRequiresCSRFAndReturnsTokenOnlyOnCreate(t *testing.T) {
 	req.Header.Set("X-CSRF-Token", "csrf")
 	rec = httptest.NewRecorder()
 	server.NewHandler().ServeHTTP(rec, req)
+	if rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("create Cache-Control = %q", rec.Header().Get("Cache-Control"))
+	}
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, body=%s", rec.Code, rec.Body.String())
 	}
@@ -113,6 +122,18 @@ func TestHTTPMutationRequiresCSRFAndReturnsTokenOnlyOnCreate(t *testing.T) {
 	}
 }
 
+func TestHTTPRemoveRequiresCSRFAndAdmin(t *testing.T) {
+	server, _ := newTestHTTPServer(t, oidcauth.Identity{Subject: "admin", Roles: []string{"admin"}})
+	req := httptest.NewRequest(http.MethodDelete, "/api/agents/codex", nil)
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "csrf"})
+	req.Header.Set("X-CSRF-Token", "csrf")
+	rec := httptest.NewRecorder()
+	server.NewHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("remove status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHealthEndpointDoesNotRequireAuth(t *testing.T) {
 	server, _ := newTestHTTPServer(t, oidcauth.Identity{})
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -120,5 +141,15 @@ func TestHealthEndpointDoesNotRequireAuth(t *testing.T) {
 	server.NewHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("health status = %d", rec.Code)
+	}
+	for header, want := range map[string]string{
+		"Cache-Control":          "no-store",
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "no-referrer",
+	} {
+		if got := rec.Header().Get(header); got != want {
+			t.Fatalf("%s = %q, want %q", header, got, want)
+		}
 	}
 }

@@ -16,7 +16,10 @@ import (
 	"github.com/ksamaschke/matrix-agent-manager/internal/oidcauth"
 )
 
-const csrfCookieName = "agent_manager_csrf"
+const defaultCSRFCookieName = "agent_manager_csrf"
+
+// csrfCookieName is retained for package-level tests and defaults.
+const csrfCookieName = defaultCSRFCookieName
 
 // Authenticator is the browser-facing subset of the generic OIDC boundary.
 type Authenticator interface {
@@ -30,6 +33,8 @@ type AgentService interface {
 	Create(context.Context, agents.CreateRequest) (agents.Result, error)
 	Rotate(context.Context, string) (agents.Result, error)
 	Deactivate(context.Context, string) (agents.Result, error)
+	Revoke(context.Context, string) (agents.Result, error)
+	Remove(context.Context, string) (agents.Result, error)
 }
 
 // Server exposes the authenticated admin UI/API.
@@ -39,6 +44,7 @@ type Server struct {
 	adminRoles        []string
 	viewerRoles       []string
 	sessionCookieName string
+	csrfCookieName    string
 	cookieSecure      bool
 }
 
@@ -62,12 +68,17 @@ func NewServer(auth Authenticator, service AgentService, config ServerConfig) (*
 	if cookieName == "" {
 		cookieName = "agent_manager_session"
 	}
+	csrfName := strings.TrimSpace(config.CSRFCookieName)
+	if csrfName == "" {
+		csrfName = defaultCSRFCookieName
+	}
 	return &Server{
 		auth:              auth,
 		agents:            service,
 		adminRoles:        append([]string(nil), config.AdminRoles...),
 		viewerRoles:       append([]string(nil), config.ViewerRoles...),
 		sessionCookieName: cookieName,
+		csrfCookieName:    csrfName,
 		cookieSecure:      config.CookieSecure,
 	}, nil
 }
@@ -85,7 +96,16 @@ func (s *Server) NewHandler() http.Handler {
 	mux.HandleFunc("POST /api/agents", s.createAgent)
 	mux.HandleFunc("POST /api/agents/{name}/rotate", s.rotateAgent)
 	mux.HandleFunc("POST /api/agents/{name}/deactivate", s.deactivateAgent)
-	return mux
+	mux.HandleFunc("POST /api/agents/{name}/revoke", s.revokeAgent)
+	mux.HandleFunc("DELETE /api/agents/{name}", s.removeAgent)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func health(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +154,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: s.sessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: "", Path: "/", MaxAge: -1, Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: s.csrfCookieName, Value: "", Path: "/", MaxAge: -1, Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -148,6 +168,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	csrf := s.ensureCSRFCookie(w, r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = fmt.Fprintf(w, `<!doctype html>
@@ -163,7 +184,7 @@ const message=document.querySelector('#message');
 const section=document.querySelector('#agents');
 function showMessage(text,token){message.replaceChildren();const p=document.createElement('p');p.textContent=text;message.append(p);if(token){const pre=document.createElement('pre');pre.className='token';pre.textContent=token;message.append(pre);}}
 async function api(path,options={}){options.headers={...(options.headers||{}),'X-CSRF-Token':csrf,'Content-Type':'application/json'};const response=await fetch(path,options);const text=await response.text();let data={};try{data=JSON.parse(text)}catch{}if(!response.ok)throw new Error(data.error||text||('HTTP '+response.status));return data;}
-async function load(){try{const list=await api('/api/agents',{headers:{}});section.replaceChildren();if(!list.length){const p=document.createElement('p');p.textContent='No agents registered.';section.append(p);return;}for(const agent of list){const card=document.createElement('article');card.className='agent';const title=document.createElement('strong');title.textContent=agent.display_name+' ('+agent.agent_name+')';card.append(title);const meta=document.createElement('p');meta.textContent='Status: '+agent.status+' · Generation: '+agent.generation;card.append(meta);if(agent.status==='active'){const rotate=document.createElement('button');rotate.textContent='Rotate token';rotate.onclick=async()=>{try{const result=await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/rotate',{method:'POST',body:'{}'});showMessage('New token for '+result.agent_name+'. Store it now; it will not be shown again.',result.one_time_token);await load()}catch(e){showMessage(e.message)}};card.append(rotate);const deactivate=document.createElement('button');deactivate.textContent='Deactivate';deactivate.onclick=async()=>{if(!confirm('Deactivate '+agent.agent_name+'?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/deactivate',{method:'POST',body:'{}'});showMessage('Agent deactivated.');await load()}catch(e){showMessage(e.message)}};card.append(deactivate)}section.append(card)}}catch(e){showMessage(e.message)}}
+async function load(){try{const list=await api('/api/agents',{headers:{}});section.replaceChildren();if(!list.length){const p=document.createElement('p');p.textContent='No agents registered.';section.append(p);return;}for(const agent of list){const card=document.createElement('article');card.className='agent';const title=document.createElement('strong');title.textContent=agent.display_name+' ('+agent.agent_name+')';card.append(title);const meta=document.createElement('p');meta.textContent='Status: '+agent.status+' · Generation: '+agent.generation;card.append(meta);if(agent.status==='active'){const rotate=document.createElement('button');rotate.textContent='Rotate token';rotate.onclick=async()=>{try{const result=await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/rotate',{method:'POST',body:'{}'});showMessage('New token for '+result.agent_name+'. Store it now; it will not be shown again.',result.one_time_token);await load()}catch(e){showMessage(e.message)}};card.append(rotate);const revoke=document.createElement('button');revoke.textContent='Revoke token';revoke.onclick=async()=>{if(!confirm('Revoke '+agent.agent_name+' token?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/revoke',{method:'POST',body:'{}'});showMessage('Agent token revoked.');await load()}catch(e){showMessage(e.message)}};card.append(revoke);const deactivate=document.createElement('button');deactivate.textContent='Deactivate';deactivate.onclick=async()=>{if(!confirm('Deactivate '+agent.agent_name+'?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/deactivate',{method:'POST',body:'{}'});showMessage('Agent deactivated.');await load()}catch(e){showMessage(e.message)}};card.append(deactivate);const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}else{const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}section.append(card)}}catch(e){showMessage(e.message)}}
 document.querySelector('#create').onsubmit=async(event)=>{event.preventDefault();const form=new FormData(event.target);try{const result=await api('/api/agents',{method:'POST',body:JSON.stringify({agent_name:form.get('agent_name'),display_name:form.get('display_name')})});showMessage('Agent created. Store this token now; it will not be shown again.',result.one_time_token);event.target.reset();await load()}catch(e){showMessage(e.message)}};
 load();
 </script></body></html>`, template.HTMLEscapeString(csrf), template.HTMLEscapeString(csrf))
@@ -201,7 +222,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent creation failed", http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusCreated, result)
+	s.writeMutationJSON(w, http.StatusCreated, result)
 }
 
 func (s *Server) rotateAgent(w http.ResponseWriter, r *http.Request) {
@@ -218,7 +239,7 @@ func (s *Server) rotateAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent rotation failed", http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	s.writeMutationJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) deactivateAgent(w http.ResponseWriter, r *http.Request) {
@@ -235,7 +256,41 @@ func (s *Server) deactivateAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "agent deactivation failed", http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	s.writeMutationJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) revokeAgent(w http.ResponseWriter, r *http.Request) {
+	if err := s.checkCSRF(r); err != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if _, err := s.requireAdmin(r); err != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	result, err := s.agents.Revoke(r.Context(), r.PathValue("name"))
+	if err != nil {
+		http.Error(w, "agent revoke failed", http.StatusBadRequest)
+		return
+	}
+	s.writeMutationJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) removeAgent(w http.ResponseWriter, r *http.Request) {
+	if err := s.checkCSRF(r); err != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if _, err := s.requireAdmin(r); err != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	result, err := s.agents.Remove(r.Context(), r.PathValue("name"))
+	if err != nil {
+		http.Error(w, "agent removal failed", http.StatusBadRequest)
+		return
+	}
+	s.writeMutationJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) requireViewer(r *http.Request) (oidcauth.Identity, error) {
@@ -255,7 +310,7 @@ func (s *Server) requireAdmin(r *http.Request) (oidcauth.Identity, error) {
 }
 
 func (s *Server) checkCSRF(r *http.Request) error {
-	cookie, err := r.Cookie(csrfCookieName)
+	cookie, err := r.Cookie(s.csrfCookieName)
 	if err != nil {
 		return errors.New("CSRF cookie missing")
 	}
@@ -270,7 +325,7 @@ func (s *Server) checkCSRF(r *http.Request) error {
 }
 
 func (s *Server) ensureCSRFCookie(w http.ResponseWriter, r *http.Request) string {
-	if cookie, err := r.Cookie(csrfCookieName); err == nil && cookie.Value != "" {
+	if cookie, err := r.Cookie(s.csrfCookieName); err == nil && cookie.Value != "" {
 		return cookie.Value
 	}
 	return s.setCSRFCookie(w)
@@ -282,8 +337,13 @@ func (s *Server) setCSRFCookie(w http.ResponseWriter) string {
 		return ""
 	}
 	value := base64.RawURLEncoding.EncodeToString(valueBytes)
-	http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: value, Path: "/", Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: s.csrfCookieName, Value: value, Path: "/", Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
 	return value
+}
+
+func (s *Server) writeMutationJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, status, value)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

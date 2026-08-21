@@ -94,6 +94,9 @@ func (b *KubernetesBackend) UpdateAgent(ctx context.Context, record SecretRecord
 	if err != nil {
 		return fmt.Errorf("get agent Secret for update: %w", err)
 	}
+	if record.ResourceVersion != "" && current.ResourceVersion != record.ResourceVersion {
+		return ErrConflict
+	}
 	updated, err := b.secretFromRecord(record)
 	if err != nil {
 		return err
@@ -239,15 +242,16 @@ func recordFromSecret(secret *corev1.Secret) (SecretRecord, error) {
 		return SecretRecord{}, errors.New("inactive agent Secret contains token material")
 	}
 	return SecretRecord{
-		AgentName:   agentName,
-		DisplayName: string(data["display-name"]),
-		MASUserID:   string(data["mas-user-id"]),
-		SessionID:   string(data["session-id"]),
-		AccessToken: string(data["access-token"]),
-		Generation:  generation,
-		Status:      status,
-		CreatedAt:   createdAt,
-		UpdatedAt:   updatedAt,
+		AgentName:       agentName,
+		DisplayName:     string(data["display-name"]),
+		MASUserID:       string(data["mas-user-id"]),
+		SessionID:       string(data["session-id"]),
+		AccessToken:     string(data["access-token"]),
+		ResourceVersion: secret.ResourceVersion,
+		Generation:      generation,
+		Status:          status,
+		CreatedAt:       createdAt,
+		UpdatedAt:       updatedAt,
 	}, nil
 }
 

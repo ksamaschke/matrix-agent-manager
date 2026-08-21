@@ -29,12 +29,13 @@ The optional operator/CRD is not part of this API-based MVP.
 
 ## Local development
 
-Requirements: Go 1.23 or newer.
+The production binary intentionally refuses to start with development defaults.
+Use the unit/race tests for local development; run the server only with a
+complete production-style environment and mounted Secret files.
 
 ```bash
 go test ./...
-go run ./cmd/agent-manager
-curl http://127.0.0.1:8080/healthz
+go test -race ./...
 ```
 
 Production configuration requires all trust boundaries to be explicit:

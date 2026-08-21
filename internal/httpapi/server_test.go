@@ -178,6 +178,16 @@ func TestHTTPIndexUsesNonceBoundCSP(t *testing.T) {
 	if !strings.Contains(csp, "script-src 'nonce-") || strings.Contains(csp, "script-src 'unsafe-inline'") {
 		t.Fatalf("CSP = %q", csp)
 	}
+	var csrfCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == csrfCookieName {
+			csrfCookie = cookie
+			break
+		}
+	}
+	if csrfCookie == nil || !csrfCookie.HttpOnly {
+		t.Fatalf("CSRF cookie must be HttpOnly: %#v", csrfCookie)
+	}
 }
 
 func TestHealthEndpointDoesNotRequireAuth(t *testing.T) {

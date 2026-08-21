@@ -10,6 +10,14 @@
 {{- end }}
 {{- end }}
 
+{{- define "matrix-agent-manager.serviceAccountName" -}}
+{{- default (include "matrix-agent-manager.fullname" .) .Values.serviceAccount.name -}}
+{{- end -}}
+
+{{- define "matrix-agent-manager.secretNamespace" -}}
+{{- default (default .Release.Namespace .Values.config.secretBackend.namespace) .Values.rbac.secretNamespace -}}
+{{- end -}}
+
 {{- define "matrix-agent-manager.labels" -}}
 app.kubernetes.io/name: {{ include "matrix-agent-manager.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}

@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	statePurpose   = "oidc-state"
-	sessionPurpose = "oidc-session"
+	statePurpose      = "oidc-state"
+	sessionPurpose    = "oidc-session"
+	defaultSessionTTL = 15 * time.Minute
 )
 
 // Config contains deployment-neutral OIDC settings.
@@ -34,6 +35,7 @@ type Config struct {
 	CookieName        string
 	CookieSecure      bool
 	AllowInsecureHTTP bool
+	SessionTTL        time.Duration
 	Codec             *session.Codec
 	StateStore        StateStore
 	ReadSecret        func(string) ([]byte, error)
@@ -81,6 +83,7 @@ type Authenticator struct {
 	requiredRoles []string
 	cookieName    string
 	cookieSecure  bool
+	sessionTTL    time.Duration
 }
 
 // New discovers the configured OIDC provider and prepares strict token validation.
@@ -105,6 +108,9 @@ func New(ctx context.Context, config Config) (*Authenticator, error) {
 	}
 	if !config.CookieSecure && !config.AllowInsecureHTTP {
 		return nil, errors.New("secure cookies are required unless insecure HTTP is explicitly enabled")
+	}
+	if config.SessionTTL <= 0 {
+		config.SessionTTL = defaultSessionTTL
 	}
 	if err := validateURL("OIDC issuer", config.IssuerURL, config.AllowInsecureHTTP); err != nil {
 		return nil, err
@@ -155,6 +161,7 @@ func New(ctx context.Context, config Config) (*Authenticator, error) {
 		requiredRoles: append([]string(nil), config.RequiredRoles...),
 		cookieName:    cookieName,
 		cookieSecure:  config.CookieSecure,
+		sessionTTL:    config.SessionTTL,
 	}, nil
 }
 
@@ -213,10 +220,11 @@ func (a *Authenticator) Complete(ctx context.Context, state, code string) (Ident
 	if err := identity.RequireAnyRole(a.requiredRoles...); err != nil {
 		return Identity{}, nil, err
 	}
-	sessionValue, err := a.codec.Seal(sessionPurpose, a.now().Add(8*time.Hour), identityPayload{
+	expiresAt := a.now().Add(a.sessionTTL)
+	sessionValue, err := a.codec.Seal(sessionPurpose, expiresAt, identityPayload{
 		Subject: identity.Subject,
 		Roles:   identity.Roles,
-		Expiry:  a.now().Add(8 * time.Hour).Unix(),
+		Expiry:  expiresAt.Unix(),
 	})
 	if err != nil {
 		return Identity{}, nil, err
@@ -228,7 +236,7 @@ func (a *Authenticator) Complete(ctx context.Context, state, code string) (Ident
 		Secure:   a.cookieSecure,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   8 * 60 * 60,
+		MaxAge:   int(a.sessionTTL / time.Second),
 	}
 	return identity, cookie, nil
 }
@@ -243,8 +251,8 @@ func (a *Authenticator) IdentityFromRequest(r *http.Request) (Identity, error) {
 	if err := a.codec.Open(cookie.Value, sessionPurpose, &payload); err != nil {
 		return Identity{}, errors.New("authentication required")
 	}
-	if payload.Subject == "" {
-		return Identity{}, errors.New("authenticated subject is missing")
+	if payload.Subject == "" || payload.Expiry <= a.now().Unix() {
+		return Identity{}, errors.New("authenticated session is invalid")
 	}
 	return Identity{Subject: payload.Subject, Roles: payload.Roles}, nil
 }

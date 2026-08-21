@@ -20,6 +20,7 @@ data:
   AGENT_MANAGER_OIDC_ADMIN_ROLES: {{ .Values.config.oidc.adminRoles | quote }}
   AGENT_MANAGER_OIDC_VIEWER_ROLES: {{ .Values.config.oidc.viewerRoles | quote }}
   AGENT_MANAGER_COOKIE_SECURE: {{ .Values.config.cookieSecure | quote }}
+  AGENT_MANAGER_SESSION_TTL_SECONDS: {{ .Values.config.sessionTTLSeconds | quote }}
   AGENT_MANAGER_SESSION_KEY_FILE: {{ .Values.config.sessionKeyFile | quote }}
   AGENT_MANAGER_MAS_BASE_URL: {{ .Values.config.mas.baseUrl | quote }}
   AGENT_MANAGER_MAS_ALLOW_INSECURE_HTTP: {{ .Values.config.mas.allowInsecureHTTP | quote }}

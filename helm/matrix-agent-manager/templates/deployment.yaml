@@ -9,6 +9,8 @@ metadata:
     app.kubernetes.io/part-of: matrix-agent-manager
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "matrix-agent-manager.name" . }}
@@ -20,7 +22,7 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/part-of: matrix-agent-manager
     spec:
-      serviceAccountName: {{ include "matrix-agent-manager.fullname" . }}
+      serviceAccountName: {{ include "matrix-agent-manager.serviceAccountName" . }}
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true

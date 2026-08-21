@@ -12,7 +12,10 @@ import (
 	"github.com/ksamaschke/matrix-agent-manager/internal/mas"
 )
 
-var ErrNotFound = errors.New("agent not found")
+var (
+	ErrNotFound = errors.New("agent not found")
+	ErrConflict = errors.New("agent changed concurrently")
+)
 
 type Status string
 
@@ -26,6 +29,7 @@ const (
 type MASClient interface {
 	CreateUser(context.Context, mas.CreateUserRequest) (mas.User, error)
 	CreatePersonalSession(context.Context, mas.CreatePersonalSessionRequest) (mas.PersonalSession, error)
+	RegeneratePersonalSession(context.Context, string, *uint32) (mas.PersonalSession, error)
 	ListPersonalSessions(context.Context, string) ([]mas.PersonalSession, error)
 	RevokePersonalSession(context.Context, string) error
 	DeactivateUser(context.Context, string, bool) (mas.User, error)
@@ -35,15 +39,16 @@ type MASClient interface {
 // SecretRecord is metadata plus one token value held only by the secret backend
 // and the immediate create/rotate result. Ordinary list/detail APIs omit it.
 type SecretRecord struct {
-	AgentName   string
-	DisplayName string
-	MASUserID   string
-	SessionID   string
-	AccessToken string
-	Generation  int
-	Status      Status
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	AgentName       string
+	DisplayName     string
+	MASUserID       string
+	SessionID       string
+	AccessToken     string
+	ResourceVersion string
+	Generation      int
+	Status          Status
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // SecretBackend stores agent metadata and token material.
@@ -78,7 +83,7 @@ type Result struct {
 	AgentName    string `json:"agent_name"`
 	DisplayName  string `json:"display_name"`
 	MASUserID    string `json:"mas_user_id"`
-	SessionID    string `json:"session_id"`
+	SessionID    string `json:"-"`
 	OneTimeToken string `json:"one_time_token,omitempty"`
 	Generation   int    `json:"generation"`
 	Status       Status `json:"status"`
@@ -125,11 +130,25 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, er
 			ExpiresIn:   durationPointer(s.config.TokenExpiry),
 		})
 		if err != nil {
-			_ = s.mas.DeleteUser(ctx, user.ID)
+			if cleanupErr := s.mas.DeleteUser(ctx, user.ID); cleanupErr != nil {
+				return Result{}, fmt.Errorf("create MAS personal session: %w; cleanup MAS user: %v", err, cleanupErr)
+			}
 			return Result{}, fmt.Errorf("create MAS personal session: %w", err)
 		}
 		if session.Attributes.AccessToken == "" {
-			_ = s.mas.DeleteUser(ctx, user.ID)
+			var cleanupErr error
+			if session.ID != "" {
+				cleanupErr = s.mas.RevokePersonalSession(ctx, session.ID)
+			}
+			if err := s.mas.DeleteUser(ctx, user.ID); err != nil {
+				if cleanupErr != nil {
+					return Result{}, fmt.Errorf("MAS returned no access token; revoke session: %v; cleanup MAS user: %w", cleanupErr, err)
+				}
+				return Result{}, fmt.Errorf("MAS returned no access token; cleanup MAS user: %w", err)
+			}
+			if cleanupErr != nil {
+				return Result{}, fmt.Errorf("MAS returned no access token; revoke session: %w", cleanupErr)
+			}
 			return Result{}, errors.New("MAS returned no access token")
 		}
 		now := s.now()
@@ -155,30 +174,53 @@ func (s *Service) Rotate(ctx context.Context, name string) (Result, error) {
 		if record.Status == StatusDeactivated {
 			return Result{}, errors.New("agent is deactivated")
 		}
-		session, err := s.mas.CreatePersonalSession(ctx, mas.CreatePersonalSessionRequest{ActorUserID: record.MASUserID, HumanName: record.DisplayName, Scope: s.config.TokenScope, ExpiresIn: durationPointer(s.config.TokenExpiry)})
+		var session mas.PersonalSession
+		regenerated := record.Status == StatusActive && record.SessionID != ""
+		if regenerated {
+			session, err = s.mas.RegeneratePersonalSession(ctx, record.SessionID, durationPointer(s.config.TokenExpiry))
+		} else {
+			session, err = s.mas.CreatePersonalSession(ctx, mas.CreatePersonalSessionRequest{ActorUserID: record.MASUserID, HumanName: record.DisplayName, Scope: s.config.TokenScope, ExpiresIn: durationPointer(s.config.TokenExpiry)})
+		}
 		if err != nil {
+			if regenerated {
+				return Result{}, fmt.Errorf("regenerate MAS personal session: %w", err)
+			}
 			return Result{}, fmt.Errorf("create replacement MAS session: %w", err)
 		}
-		if session.Attributes.AccessToken == "" {
+		if session.ID == "" || session.Attributes.AccessToken == "" {
+			if session.ID != "" {
+				_ = s.mas.RevokePersonalSession(ctx, session.ID)
+			}
+			if regenerated {
+				if clearErr := s.clearTokenMaterial(ctx, name, StatusRevoked); clearErr != nil {
+					_ = s.secrets.DeleteAgent(ctx, name)
+				}
+			}
 			return Result{}, errors.New("MAS returned no replacement access token")
 		}
-		oldSessionID := record.SessionID
-		oldStatus := record.Status
-		record.SessionID = session.ID
-		record.AccessToken = session.Attributes.AccessToken
-		record.Generation++
-		record.Status = StatusActive
-		record.UpdatedAt = s.now()
-		if err := s.secrets.UpdateAgent(ctx, record); err != nil {
-			_ = s.mas.RevokePersonalSession(ctx, session.ID)
+		if regenerated && session.ID != record.SessionID {
+			return Result{}, errors.New("MAS changed the personal session ID during regeneration")
+		}
+		updated := record
+		updated.SessionID = session.ID
+		updated.AccessToken = session.Attributes.AccessToken
+		updated.Generation++
+		updated.Status = StatusActive
+		updated.UpdatedAt = s.now()
+		if err := s.secrets.UpdateAgent(ctx, updated); err != nil {
+			// A regeneration invalidates the previous token before local
+			// persistence. On an ordinary persistence failure, revoke the new
+			// session and remove local token material. An explicit CAS conflict
+			// belongs to another writer, so do not revoke its stable session.
+			if !errors.Is(err, ErrConflict) {
+				_ = s.mas.RevokePersonalSession(ctx, session.ID)
+				if clearErr := s.clearTokenMaterial(ctx, name, StatusRevoked); clearErr != nil {
+					_ = s.secrets.DeleteAgent(ctx, name)
+				}
+			}
 			return Result{}, fmt.Errorf("persist replacement agent secret: %w", err)
 		}
-		if oldStatus == StatusActive && oldSessionID != "" {
-			if err := s.mas.RevokePersonalSession(ctx, oldSessionID); err != nil {
-				return Result{}, fmt.Errorf("revoke previous MAS session: %w", err)
-			}
-		}
-		return resultFromRecord(record, true), nil
+		return resultFromRecord(updated, true), nil
 	})
 }
 
@@ -204,9 +246,11 @@ func (s *Service) Revoke(ctx context.Context, name string) (Result, error) {
 		record.Status = StatusRevoked
 		record.UpdatedAt = s.now()
 		if err := s.secrets.UpdateAgent(ctx, record); err != nil {
-			// MAS has already revoked the sessions. Do not retain the old token
-			// locally when the status write cannot be persisted.
-			_ = s.secrets.DeleteAgent(ctx, name)
+			// MAS has already revoked the sessions. Retry a fresh read/update so
+			// a stale writer cannot delete a newer Secret or retain token bytes.
+			if clearErr := s.clearTokenMaterial(ctx, name, StatusRevoked); clearErr != nil {
+				return Result{}, fmt.Errorf("persist revoked agent: %w; clear token material: %v", err, clearErr)
+			}
 			return Result{}, fmt.Errorf("persist revoked agent: %w", err)
 		}
 		return resultFromRecord(record, false), nil
@@ -236,9 +280,11 @@ func (s *Service) Deactivate(ctx context.Context, name string) (Result, error) {
 		record.Status = StatusDeactivated
 		record.UpdatedAt = s.now()
 		if err := s.secrets.UpdateAgent(ctx, record); err != nil {
-			// MAS has already accepted deactivation. Prefer removing local token
-			// material over retaining a stale credential after a write failure.
-			_ = s.secrets.DeleteAgent(ctx, name)
+			// MAS has already accepted deactivation. Retry a fresh read/update so
+			// a stale writer cannot delete a newer Secret or retain token bytes.
+			if clearErr := s.clearTokenMaterial(ctx, name, StatusDeactivated); clearErr != nil {
+				return Result{}, fmt.Errorf("persist deactivated agent: %w; clear token material: %v", err, clearErr)
+			}
 			return Result{}, fmt.Errorf("persist deactivated agent: %w", err)
 		}
 		return resultFromRecord(record, false), nil
@@ -269,11 +315,7 @@ func (s *Service) Remove(ctx context.Context, name string) (Result, error) {
 			return Result{}, fmt.Errorf("deactivate MAS user: %w", err)
 		}
 		if err := s.secrets.DeleteAgent(ctx, name); err != nil {
-			record.SessionID = ""
-			record.AccessToken = ""
-			record.Status = StatusDeactivated
-			record.UpdatedAt = s.now()
-			if clearErr := s.secrets.UpdateAgent(ctx, record); clearErr != nil {
+			if clearErr := s.clearTokenMaterial(ctx, name, StatusDeactivated); clearErr != nil {
 				return Result{}, fmt.Errorf("delete agent Secret: %w; clear token material: %v", err, clearErr)
 			}
 			return Result{}, fmt.Errorf("delete agent Secret: %w", err)
@@ -283,6 +325,28 @@ func (s *Service) Remove(ctx context.Context, name string) (Result, error) {
 		record.Status = StatusDeactivated
 		return resultFromRecord(record, false), nil
 	})
+}
+
+func (s *Service) clearTokenMaterial(ctx context.Context, name string, status Status) error {
+	for attempt := 0; attempt < 3; attempt++ {
+		record, err := s.secrets.GetAgent(ctx, name)
+		if errors.Is(err, ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		record.SessionID = ""
+		record.AccessToken = ""
+		record.Status = status
+		record.UpdatedAt = s.now()
+		if err := s.secrets.UpdateAgent(ctx, record); err == nil {
+			return nil
+		} else if !errors.Is(err, ErrConflict) {
+			return err
+		}
+	}
+	return ErrConflict
 }
 
 func (s *Service) revokeActiveSessions(ctx context.Context, record SecretRecord) error {
@@ -303,13 +367,9 @@ func (s *Service) revokeActiveSessions(ctx context.Context, record SecretRecord)
 			return fmt.Errorf("revoke agent session: %w", err)
 		}
 	}
-	if record.Status == StatusActive && record.SessionID != "" {
-		if _, ok := seen[record.SessionID]; !ok {
-			if err := s.mas.RevokePersonalSession(ctx, record.SessionID); err != nil {
-				return fmt.Errorf("revoke recorded agent session: %w", err)
-			}
-		}
-	}
+	// The active-session listing is authoritative. If the recorded ID is absent,
+	// it was already revoked or is no longer active; do not retry a stale ID and
+	// turn an otherwise idempotent operation into a MAS 409 failure.
 	return nil
 }
 

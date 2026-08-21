@@ -371,7 +371,7 @@ func (s *Server) setCSRFCookie(w http.ResponseWriter) string {
 		return ""
 	}
 	value := base64.RawURLEncoding.EncodeToString(valueBytes)
-	http.SetCookie(w, &http.Cookie{Name: s.csrfCookieName, Value: value, Path: "/", Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: s.csrfCookieName, Value: value, Path: "/", HttpOnly: true, Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
 	return value
 }
 

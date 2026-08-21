@@ -144,8 +144,9 @@ func codecForTest(t *testing.T) *session.Codec {
 func newTestAuthenticator(codec *session.Codec, now time.Time) (*Authenticator, error) {
 	return &Authenticator{
 		codec:      codec,
-		stateStore: NewMemoryStateStore(),
+		stateStore: NewMemoryStateStoreWithClock(4096, func() time.Time { return now }),
 		now:        func() time.Time { return now },
 		rolesClaim: "roles",
+		sessionTTL: defaultSessionTTL,
 	}, nil
 }

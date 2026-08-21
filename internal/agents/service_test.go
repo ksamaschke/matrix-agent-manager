@@ -13,6 +13,7 @@ import (
 type fakeMAS struct {
 	users            []mas.User
 	sessions         []mas.PersonalSession
+	regenerated      []string
 	revoked          []string
 	deactivated      []string
 	failCreateSecret bool
@@ -49,6 +50,17 @@ func (f *fakeMAS) ListPersonalSessions(_ context.Context, owner string) ([]mas.P
 func (f *fakeMAS) RevokePersonalSession(_ context.Context, id string) error {
 	f.revoked = append(f.revoked, id)
 	return nil
+}
+
+func (f *fakeMAS) RegeneratePersonalSession(_ context.Context, id string, _ *uint32) (mas.PersonalSession, error) {
+	for i := range f.sessions {
+		if f.sessions[i].ID == id {
+			f.sessions[i].Attributes.AccessToken = "regenerated-" + id
+			f.regenerated = append(f.regenerated, id)
+			return f.sessions[i], nil
+		}
+	}
+	return mas.PersonalSession{}, errors.New("session not found")
 }
 
 func (f *fakeMAS) DeactivateUser(_ context.Context, id string, _ bool) (mas.User, error) {
@@ -143,7 +155,7 @@ func TestCreatePersistsBeforeReturningToken(t *testing.T) {
 	}
 }
 
-func TestRotateStoresNewTokenBeforeRevokingOld(t *testing.T) {
+func TestRotateRegeneratesActiveSessionAtomically(t *testing.T) {
 	service, fake, secrets := newTestService()
 	created, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"})
 	if err != nil {
@@ -156,8 +168,11 @@ func TestRotateStoresNewTokenBeforeRevokingOld(t *testing.T) {
 	if rotated.Generation != 2 || rotated.OneTimeToken == created.OneTimeToken {
 		t.Fatalf("rotated = %+v", rotated)
 	}
-	if len(fake.revoked) != 1 || fake.revoked[0] != created.SessionID {
-		t.Fatalf("revoked = %#v", fake.revoked)
+	if len(fake.regenerated) != 1 || fake.regenerated[0] != created.SessionID {
+		t.Fatalf("regenerated = %#v", fake.regenerated)
+	}
+	if len(fake.revoked) != 0 {
+		t.Fatalf("unexpected revoke calls = %#v", fake.revoked)
 	}
 	stored, _ := secrets.GetAgent(context.Background(), "codex")
 	if stored.AccessToken != rotated.OneTimeToken || stored.SessionID != rotated.SessionID {
@@ -175,12 +190,11 @@ func TestRotateLeavesOldTokenWhenPersistenceFails(t *testing.T) {
 	if _, err := service.Rotate(context.Background(), "codex"); err == nil {
 		t.Fatal("expected rotate failure")
 	}
-	if len(fake.revoked) != 1 || fake.revoked[0] != "session-user-codex-1" {
-		t.Fatalf("new session cleanup = %#v", fake.revoked)
+	if len(fake.revoked) != 1 || fake.revoked[0] != created.SessionID {
+		t.Fatalf("regenerated session cleanup = %#v", fake.revoked)
 	}
-	stored, _ := secrets.GetAgent(context.Background(), "codex")
-	if stored.AccessToken != created.OneTimeToken {
-		t.Fatalf("old token was not retained: %+v", stored)
+	if _, err := secrets.GetAgent(context.Background(), "codex"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("agent Secret after failed regeneration = %v, want not found", err)
 	}
 }
 

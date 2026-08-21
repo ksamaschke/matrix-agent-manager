@@ -1,0 +1,33 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "matrix-agent-manager.fullname" . }}-secrets
+  namespace: {{ include "matrix-agent-manager.secretNamespace" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "matrix-agent-manager.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "matrix-agent-manager.fullname" . }}-secrets
+  namespace: {{ include "matrix-agent-manager.secretNamespace" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "matrix-agent-manager.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "matrix-agent-manager.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "matrix-agent-manager.fullname" . }}-secrets
+{{- end }}

@@ -48,6 +48,7 @@ func main() {
 		RolesClaim:       cfg.OIDCRolesClaim,
 		RequiredRoles:    cfg.OIDCRequiredRoles,
 		CookieSecure:     cfg.CookieSecure,
+		SessionTTL:       time.Duration(cfg.SessionTTLSeconds) * time.Second,
 		Codec:            codec,
 		StateStore:       stateStore,
 	})
@@ -56,6 +57,7 @@ func main() {
 	}
 
 	masClient, err := mas.NewClient(mas.ClientConfig{
+		BaseURL:             cfg.MASBaseURL,
 		TokenURL:            cfg.MASTokenURL,
 		UsersURL:            cfg.MASUsersURL,
 		PersonalSessionsURL: cfg.MASPersonalSessionsURL,

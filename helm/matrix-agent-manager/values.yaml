@@ -13,8 +13,14 @@ fullnameOverride: ""
 
 serviceAccount:
   create: true
+  # Empty uses the generated release name.
   name: ""
   annotations: {}
+
+rbac:
+  create: true
+  # Empty uses config.secretBackend.namespace, then the release namespace.
+  secretNamespace: ""
 
 service:
   type: ClusterIP
@@ -52,6 +58,7 @@ config:
     adminRoles: ""
     viewerRoles: ""
   cookieSecure: true
+  sessionTTLSeconds: 900
   sessionKeyFile: /var/run/secrets/matrix-agent-manager/session/session-key
   mas:
     baseUrl: ""
@@ -66,9 +73,9 @@ config:
     namespace: ""
 
 agent:
-  secretNamePrefix: ""
-  tokenScope: ""
-  tokenExpirySeconds: 0
+  secretNamePrefix: matrix-agent
+  tokenScope: "urn:matrix:client:api:*"
+  tokenExpirySeconds: 3600
 
 secretRefs:
   # Synthetic local-development Secret name. Production overlays must replace

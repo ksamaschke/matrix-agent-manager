@@ -33,6 +33,7 @@ type ClientConfig struct {
 	ClientSecretFile    string
 	HTTPClient          *http.Client
 	AllowInsecureHTTP   bool
+	BaseURL             string
 }
 
 // Client talks to the MAS Admin API using client credentials.
@@ -101,6 +102,11 @@ type CreatePersonalSessionRequest struct {
 	ExpiresIn   *uint32 `json:"expires_in,omitempty"`
 }
 
+// RegeneratePersonalSessionRequest is the MAS v1.23 schema.
+type RegeneratePersonalSessionRequest struct {
+	ExpiresIn *uint32 `json:"expires_in,omitempty"`
+}
+
 type deactivateUserRequest struct {
 	SkipErase bool `json:"skip_erase,omitempty"`
 }
@@ -151,11 +157,31 @@ func NewClient(config ClientConfig, readSecret SecretReader) (*Client, error) {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
-	return &Client{
-		config:     config,
-		readSecret: readSecret,
-		httpClient: httpClient,
-	}, nil
+	if config.BaseURL != "" {
+		if err := validateEndpoint("BaseURL", config.BaseURL, config.AllowInsecureHTTP); err != nil {
+			return nil, err
+		}
+		base, _ := url.Parse(config.BaseURL)
+		for name, raw := range map[string]string{"TokenURL": config.TokenURL, "UsersURL": config.UsersURL, "PersonalSessionsURL": config.PersonalSessionsURL} {
+			u, _ := url.Parse(raw)
+			if u.Scheme != base.Scheme || u.Host != base.Host {
+				return nil, fmt.Errorf("%s must share the configured MAS origin", name)
+			}
+		}
+	}
+	if httpClient.CheckRedirect == nil {
+		httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			if len(via) == 0 {
+				return nil
+			}
+			previous := via[len(via)-1].URL
+			if req.URL.Scheme != previous.Scheme || req.URL.Host != previous.Host || req.URL.User != nil {
+				return http.ErrUseLastResponse
+			}
+			return nil
+		}
+	}
+	return &Client{config: config, readSecret: readSecret, httpClient: httpClient}, nil
 }
 
 // CreateUser creates a MAS user and returns its resource metadata.
@@ -171,6 +197,21 @@ func (c *Client) CreateUser(ctx context.Context, request CreateUserRequest) (Use
 func (c *Client) CreatePersonalSession(ctx context.Context, request CreatePersonalSessionRequest) (PersonalSession, error) {
 	var response singleResponse[PersonalSessionAttributes]
 	if err := c.doJSON(ctx, http.MethodPost, c.config.PersonalSessionsURL, request, &response); err != nil {
+		return PersonalSession{}, err
+	}
+	return PersonalSession{Type: response.Data.Type, ID: response.Data.ID, Attributes: response.Data.Attributes}, nil
+}
+
+// RegeneratePersonalSession atomically replaces the token for an existing MAS
+// personal session. The session ID remains stable and the previous token is
+// invalidated by MAS as part of the operation.
+func (c *Client) RegeneratePersonalSession(ctx context.Context, id string, expiresIn *uint32) (PersonalSession, error) {
+	endpoint, err := resourceEndpoint(c.config.PersonalSessionsURL, id, "/regenerate")
+	if err != nil {
+		return PersonalSession{}, err
+	}
+	var response singleResponse[PersonalSessionAttributes]
+	if err := c.doJSON(ctx, http.MethodPost, endpoint, RegeneratePersonalSessionRequest{ExpiresIn: expiresIn}, &response); err != nil {
 		return PersonalSession{}, err
 	}
 	return PersonalSession{Type: response.Data.Type, ID: response.Data.ID, Attributes: response.Data.Attributes}, nil

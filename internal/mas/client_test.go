@@ -131,6 +131,28 @@ func TestClientCreatesAndRevokesPersonalSession(t *testing.T) {
 			})
 			return
 		}
+		if strings.HasSuffix(r.URL.Path, "/regenerate") && r.Method == http.MethodPost {
+			var request RegeneratePersonalSessionRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode regenerate request: %v", err)
+			}
+			if request.ExpiresIn == nil || *request.ExpiresIn != 3600 {
+				t.Errorf("regenerate expiry = %#v", request.ExpiresIn)
+			}
+			writeJSON(t, w, http.StatusCreated, singleResponse[PersonalSessionAttributes]{
+				Data: resource[PersonalSessionAttributes]{
+					Type: "personal-session",
+					ID:   "01J00000000000000000000001",
+					Attributes: PersonalSessionAttributes{
+						ActorUserID: "01J00000000000000000000000",
+						HumanName:   "Hermes Codex",
+						Scope:       "openid",
+						AccessToken: "synthetic-regenerated-token",
+					},
+				},
+			})
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/revoke") && r.Method == http.MethodPost {
 			if r.Header.Get("Authorization") != "Bearer synthetic-mas-access-token" {
 				t.Errorf("missing admin authorization")
@@ -166,6 +188,14 @@ func TestClientCreatesAndRevokesPersonalSession(t *testing.T) {
 	}
 	if session.ID != "01J00000000000000000000001" || session.Attributes.AccessToken != "synthetic-agent-access-token" {
 		t.Fatalf("unexpected session: %+v", session)
+	}
+	expiresIn := uint32(3600)
+	regenerated, err := client.RegeneratePersonalSession(context.Background(), session.ID, &expiresIn)
+	if err != nil {
+		t.Fatalf("RegeneratePersonalSession() error = %v", err)
+	}
+	if regenerated.ID != session.ID || regenerated.Attributes.AccessToken != "synthetic-regenerated-token" {
+		t.Fatalf("unexpected regenerated session: %+v", regenerated)
 	}
 	if err := client.RevokePersonalSession(context.Background(), session.ID); err != nil {
 		t.Fatalf("RevokePersonalSession() error = %v", err)

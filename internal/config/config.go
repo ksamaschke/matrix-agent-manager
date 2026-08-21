@@ -28,6 +28,7 @@ type Config struct {
 	OIDCViewerRoles      []string
 	CookieSecure         bool
 	SessionKeyFile       string
+	SessionTTLSeconds    uint32
 
 	MASBaseURL             string
 	MASAllowInsecureHTTP   bool
@@ -66,6 +67,7 @@ func Load(get Lookup) (Config, error) {
 		OIDCViewerRoles:        splitCSV(get("AGENT_MANAGER_OIDC_VIEWER_ROLES")),
 		CookieSecure:           valueOr(get("AGENT_MANAGER_COOKIE_SECURE"), "false") == "true",
 		SessionKeyFile:         get("AGENT_MANAGER_SESSION_KEY_FILE"),
+		SessionTTLSeconds:      900,
 		MASBaseURL:             get("AGENT_MANAGER_MAS_BASE_URL"),
 		MASAllowInsecureHTTP:   valueOr(get("AGENT_MANAGER_MAS_ALLOW_INSECURE_HTTP"), "false") == "true",
 		MASTokenURL:            get("AGENT_MANAGER_MAS_TOKEN_URL"),
@@ -84,6 +86,13 @@ func Load(get Lookup) (Config, error) {
 			return Config{}, fmt.Errorf("AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS must be an unsigned integer: %w", err)
 		}
 		cfg.AgentTokenExpirySeconds = uint32(seconds)
+	}
+	if raw := get("AGENT_MANAGER_SESSION_TTL_SECONDS"); raw != "" {
+		seconds, err := strconv.ParseUint(raw, 10, 32)
+		if err != nil {
+			return Config{}, fmt.Errorf("AGENT_MANAGER_SESSION_TTL_SECONDS must be an unsigned integer: %w", err)
+		}
+		cfg.SessionTTLSeconds = uint32(seconds)
 	}
 
 	if cfg.Environment != "development" && cfg.Environment != "test" && cfg.Environment != "production" {
@@ -151,6 +160,9 @@ func Load(get Lookup) (Config, error) {
 	}
 	if cfg.AgentTokenExpirySeconds == 0 {
 		return Config{}, errors.New("AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS must be positive in production")
+	}
+	if cfg.SessionTTLSeconds == 0 {
+		return Config{}, errors.New("AGENT_MANAGER_SESSION_TTL_SECONDS must be positive in production")
 	}
 	if !cfg.CookieSecure {
 		return Config{}, errors.New("AGENT_MANAGER_COOKIE_SECURE must be true in production")

@@ -23,5 +23,6 @@ public issue.
 - Production startup fails closed when trust-boundary configuration is missing.
 - The public product repository contains no real credentials or private hostnames.
 
-Security review is required before enabling mutating APIs or publishing a
-production deployment chart.
+Security review is a release gate for mutating APIs and production deployment.
+The repository's tests and static checks are necessary but do not replace live
+Keycloak, MAS, Kubernetes RBAC, and ArgoCD acceptance testing.

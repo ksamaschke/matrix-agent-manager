@@ -1,0 +1,24 @@
+apiVersion: v2
+name: matrix-agent-manager
+description: Open-source control plane for managing Matrix-based agents
+type: application
+version: 0.1.0
+appVersion: 0.1.0
+home: https://github.com/ksamaschke/matrix-agent-manager
+sources:
+  - https://github.com/ksamaschke/matrix-agent-manager
+keywords:
+  - matrix
+  - agents
+  - kubernetes
+  - oidc
+  - mas
+maintainers: []
+
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "true"
+  artifacthub.io/operatorCapabilities: Basic Install
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/ksamaschke/matrix-agent-manager

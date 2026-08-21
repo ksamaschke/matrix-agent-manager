@@ -1,0 +1,23 @@
+.DS_Store
+*.log
+coverage.out
+coverage.html
+.env
+.env.*
+!.env.example
+bin/
+dist/
+.tmp/
+helm-rendered.yaml
+vendor/
+
+# Local credentials and cluster state
+*.pem
+*.key
+kubeconfig*
+secrets/
+
+# IDE state
+.idea/
+.vscode/
+*.swp

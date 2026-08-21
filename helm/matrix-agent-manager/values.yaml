@@ -1,0 +1,71 @@
+# Deployment-neutral defaults. Production deployments must provide all values
+# marked required and must reference Secret objects rather than inline values.
+replicaCount: 1
+
+image:
+  # Synthetic development default. Production overlays must replace this with
+  # an immutable release reference or digest.
+  reference: ghcr.io/example/matrix-agent-manager:0.1.0
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+service:
+  type: ClusterIP
+  port: 8080
+
+httpRoute:
+  enabled: false
+  hostnames: []
+  parentRefs: []
+
+resources: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+
+config:
+  environment: development
+  httpAddr: ":8080"
+  oidc:
+    issuerUrl: ""
+    clientId: ""
+    audience: ""
+    requiredRoles: []
+  mas:
+    baseUrl: ""
+    clientId: ""
+    clientSecretFile: /var/run/secrets/matrix-agent-manager/mas-client-secret
+  secretBackend:
+    type: kubernetes
+    namespace: ""
+
+secretRefs:
+  # Synthetic local-development Secret name. Production overlays must replace
+  # this with a separately managed Secret reference.
+  masClientSecret:
+    name: matrix-agent-manager-mas-client
+    key: client-secret
+
+operator:
+  enabled: false
+
+crds:
+  install: false
+
+networkPolicy:
+  enabled: false

@@ -1,0 +1,7 @@
+Matrix Agent Manager has been rendered.
+
+Health: /healthz
+Readiness: /readyz
+
+Production deployments must provide the referenced MAS client Secret and all
+OIDC/MAS configuration values through their environment overlay.

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "matrix-agent-manager.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "matrix-agent-manager.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/part-of: matrix-agent-manager
+data:
+  AGENT_MANAGER_ENV: {{ .Values.config.environment | quote }}
+  AGENT_MANAGER_HTTP_ADDR: {{ .Values.config.httpAddr | quote }}
+  AGENT_MANAGER_OIDC_ISSUER_URL: {{ .Values.config.oidc.issuerUrl | quote }}
+  AGENT_MANAGER_OIDC_CLIENT_ID: {{ .Values.config.oidc.clientId | quote }}
+  AGENT_MANAGER_OIDC_AUDIENCE: {{ .Values.config.oidc.audience | quote }}
+  AGENT_MANAGER_MAS_BASE_URL: {{ .Values.config.mas.baseUrl | quote }}
+  AGENT_MANAGER_MAS_CLIENT_ID: {{ .Values.config.mas.clientId | quote }}
+  AGENT_MANAGER_MAS_CLIENT_SECRET_FILE: {{ .Values.config.mas.clientSecretFile | quote }}
+  AGENT_MANAGER_SECRET_BACKEND: {{ .Values.config.secretBackend.type | quote }}
+  AGENT_MANAGER_SECRET_NAMESPACE: {{ .Values.config.secretBackend.namespace | quote }}

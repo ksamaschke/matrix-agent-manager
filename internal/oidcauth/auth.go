@@ -262,15 +262,15 @@ func (a *Authenticator) sealState(payload statePayload) (string, error) {
 }
 
 func (a *Authenticator) openState(token string) (statePayload, error) {
-	if !a.stateStore.Consume(token, a.now()) {
-		return statePayload{}, errors.New("invalid OIDC state")
-	}
 	var payload statePayload
 	if err := a.codec.Open(token, statePurpose, &payload); err != nil {
 		return statePayload{}, errors.New("invalid OIDC state")
 	}
 	if payload.Nonce == "" || payload.Verifier == "" {
 		return statePayload{}, errors.New("OIDC state is incomplete")
+	}
+	if !a.stateStore.Consume(token, a.now()) {
+		return statePayload{}, errors.New("invalid OIDC state")
 	}
 	return payload, nil
 }

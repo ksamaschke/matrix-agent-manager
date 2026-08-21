@@ -103,7 +103,7 @@ func (s *Server) NewHandler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'")
 		mux.ServeHTTP(w, r)
 	})
 }
@@ -168,6 +168,15 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	// The page has inline JavaScript for the small deployment-neutral MVP. Bind it
+	// to a fresh nonce instead of permitting arbitrary inline script execution.
+	nonceBytes := make([]byte, 24)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		http.Error(w, "page unavailable", http.StatusInternalServerError)
+		return
+	}
+	nonce := base64.RawURLEncoding.EncodeToString(nonceBytes)
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'nonce-"+nonce+"'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	w.Header().Set("Cache-Control", "no-store")
 	csrf := s.ensureCSRFCookie(w, r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -178,7 +187,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 <form id="create"><input name="agent_name" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="agent name"><input name="display_name" required placeholder="display name"><button>Create agent</button></form>
 <form method="post" action="/auth/logout"><input type="hidden" name="csrf" value="%s"><button>Log out</button></form>
 <div id="message" aria-live="polite"></div><section id="agents"><p>Loading…</p></section>
-<script>
+<script nonce="%s">
 const csrf=document.querySelector('meta[name="csrf-token"]').content;
 const message=document.querySelector('#message');
 const section=document.querySelector('#agents');
@@ -187,7 +196,7 @@ async function api(path,options={}){options.headers={...(options.headers||{}),'X
 async function load(){try{const list=await api('/api/agents',{headers:{}});section.replaceChildren();if(!list.length){const p=document.createElement('p');p.textContent='No agents registered.';section.append(p);return;}for(const agent of list){const card=document.createElement('article');card.className='agent';const title=document.createElement('strong');title.textContent=agent.display_name+' ('+agent.agent_name+')';card.append(title);const meta=document.createElement('p');meta.textContent='Status: '+agent.status+' · Generation: '+agent.generation;card.append(meta);if(agent.status==='active'){const rotate=document.createElement('button');rotate.textContent='Rotate token';rotate.onclick=async()=>{try{const result=await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/rotate',{method:'POST',body:'{}'});showMessage('New token for '+result.agent_name+'. Store it now; it will not be shown again.',result.one_time_token);await load()}catch(e){showMessage(e.message)}};card.append(rotate);const revoke=document.createElement('button');revoke.textContent='Revoke token';revoke.onclick=async()=>{if(!confirm('Revoke '+agent.agent_name+' token?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/revoke',{method:'POST',body:'{}'});showMessage('Agent token revoked.');await load()}catch(e){showMessage(e.message)}};card.append(revoke);const deactivate=document.createElement('button');deactivate.textContent='Deactivate';deactivate.onclick=async()=>{if(!confirm('Deactivate '+agent.agent_name+'?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/deactivate',{method:'POST',body:'{}'});showMessage('Agent deactivated.');await load()}catch(e){showMessage(e.message)}};card.append(deactivate);const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}else{const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}section.append(card)}}catch(e){showMessage(e.message)}}
 document.querySelector('#create').onsubmit=async(event)=>{event.preventDefault();const form=new FormData(event.target);try{const result=await api('/api/agents',{method:'POST',body:JSON.stringify({agent_name:form.get('agent_name'),display_name:form.get('display_name')})});showMessage('Agent created. Store this token now; it will not be shown again.',result.one_time_token);event.target.reset();await load()}catch(e){showMessage(e.message)}};
 load();
-</script></body></html>`, template.HTMLEscapeString(csrf), template.HTMLEscapeString(csrf))
+</script></body></html>`, template.HTMLEscapeString(csrf), template.HTMLEscapeString(csrf), template.HTMLEscapeString(nonce))
 }
 
 func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {

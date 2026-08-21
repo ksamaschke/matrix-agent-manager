@@ -17,9 +17,12 @@ data:
   AGENT_MANAGER_OIDC_REDIRECT_URL: {{ .Values.config.oidc.redirectUrl | quote }}
   AGENT_MANAGER_OIDC_ROLES_CLAIM: {{ .Values.config.oidc.rolesClaim | quote }}
   AGENT_MANAGER_OIDC_REQUIRED_ROLES: {{ .Values.config.oidc.requiredRoles | quote }}
+  AGENT_MANAGER_OIDC_ADMIN_ROLES: {{ .Values.config.oidc.adminRoles | quote }}
+  AGENT_MANAGER_OIDC_VIEWER_ROLES: {{ .Values.config.oidc.viewerRoles | quote }}
   AGENT_MANAGER_COOKIE_SECURE: {{ .Values.config.cookieSecure | quote }}
   AGENT_MANAGER_SESSION_KEY_FILE: {{ .Values.config.sessionKeyFile | quote }}
   AGENT_MANAGER_MAS_BASE_URL: {{ .Values.config.mas.baseUrl | quote }}
+  AGENT_MANAGER_MAS_ALLOW_INSECURE_HTTP: {{ .Values.config.mas.allowInsecureHTTP | quote }}
   AGENT_MANAGER_MAS_TOKEN_URL: {{ .Values.config.mas.tokenUrl | quote }}
   AGENT_MANAGER_MAS_USERS_URL: {{ .Values.config.mas.usersUrl | quote }}
   AGENT_MANAGER_MAS_PERSONAL_SESSIONS_URL: {{ .Values.config.mas.personalSessionsUrl | quote }}
@@ -27,3 +30,6 @@ data:
   AGENT_MANAGER_MAS_CLIENT_SECRET_FILE: {{ .Values.config.mas.clientSecretFile | quote }}
   AGENT_MANAGER_SECRET_BACKEND: {{ .Values.config.secretBackend.type | quote }}
   AGENT_MANAGER_SECRET_NAMESPACE: {{ .Values.config.secretBackend.namespace | quote }}
+  AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX: {{ .Values.agent.secretNamePrefix | quote }}
+  AGENT_MANAGER_AGENT_TOKEN_SCOPE: {{ .Values.agent.tokenScope | quote }}
+  AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS: {{ .Values.agent.tokenExpirySeconds | quote }}

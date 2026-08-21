@@ -33,7 +33,9 @@
             "clientSecretFile": { "type": "string", "minLength": 1 },
             "redirectUrl": { "type": "string" },
             "rolesClaim": { "type": "string" },
-            "requiredRoles": { "type": "string" }
+            "requiredRoles": { "type": "string" },
+            "adminRoles": { "type": "string" },
+            "viewerRoles": { "type": "string" }
           },
           "required": ["issuerUrl", "clientId", "audience", "clientSecretFile", "redirectUrl", "rolesClaim", "requiredRoles"]
         },
@@ -42,6 +44,7 @@
           "required": ["baseUrl", "tokenUrl", "usersUrl", "personalSessionsUrl", "clientId", "clientSecretFile"],
           "properties": {
             "baseUrl": { "type": "string" },
+            "allowInsecureHTTP": { "type": "boolean" },
             "tokenUrl": { "type": "string" },
             "usersUrl": { "type": "string" },
             "personalSessionsUrl": { "type": "string" },
@@ -57,6 +60,15 @@
             "namespace": { "type": "string" }
           }
         }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": ["secretNamePrefix", "tokenScope", "tokenExpirySeconds"],
+      "properties": {
+        "secretNamePrefix": { "type": "string" },
+        "tokenScope": { "type": "string" },
+        "tokenExpirySeconds": { "type": "integer", "minimum": 0 }
       }
     },
     "secretRefs": {

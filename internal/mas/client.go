@@ -32,6 +32,7 @@ type ClientConfig struct {
 	ClientID            string
 	ClientSecretFile    string
 	HTTPClient          *http.Client
+	AllowInsecureHTTP   bool
 }
 
 // Client talks to the MAS Admin API using client credentials.
@@ -126,7 +127,7 @@ func NewClient(config ClientConfig, readSecret SecretReader) (*Client, error) {
 		"UsersURL":            config.UsersURL,
 		"PersonalSessionsURL": config.PersonalSessionsURL,
 	} {
-		if err := validateEndpoint(name, raw); err != nil {
+		if err := validateEndpoint(name, raw, config.AllowInsecureHTTP); err != nil {
 			return nil, err
 		}
 	}
@@ -279,13 +280,13 @@ func (c *Client) accessTokenFor(ctx context.Context) (string, error) {
 	return c.accessToken, nil
 }
 
-func validateEndpoint(name, raw string) error {
+func validateEndpoint(name, raw string, allowInsecureHTTP bool) error {
 	if strings.TrimSpace(raw) == "" {
 		return fmt.Errorf("%s is required", name)
 	}
 	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("%s must be an absolute HTTP(S) URL without userinfo, query, or fragment", name)
+	if err != nil || (u.Scheme != "https" && !(allowInsecureHTTP && u.Scheme == "http")) || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%s must be an absolute HTTPS URL without userinfo, query, or fragment", name)
 	}
 	return nil
 }

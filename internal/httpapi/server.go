@@ -39,6 +39,7 @@ type Server struct {
 	adminRoles        []string
 	viewerRoles       []string
 	sessionCookieName string
+	cookieSecure      bool
 }
 
 // ServerConfig keeps deployment-specific authorization names outside handlers.
@@ -46,6 +47,8 @@ type ServerConfig struct {
 	AdminRoles        []string
 	ViewerRoles       []string
 	SessionCookieName string
+	CSRFCookieName    string
+	CookieSecure      bool
 }
 
 func NewServer(auth Authenticator, service AgentService, config ServerConfig) (*Server, error) {
@@ -65,6 +68,7 @@ func NewServer(auth Authenticator, service AgentService, config ServerConfig) (*
 		adminRoles:        append([]string(nil), config.AdminRoles...),
 		viewerRoles:       append([]string(nil), config.ViewerRoles...),
 		sessionCookieName: cookieName,
+		cookieSecure:      config.CookieSecure,
 	}, nil
 }
 
@@ -129,8 +133,8 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: s.sessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: "", Path: "/", MaxAge: -1, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: s.sessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: "", Path: "/", MaxAge: -1, Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -262,7 +266,7 @@ func (s *Server) setCSRFCookie(w http.ResponseWriter) string {
 		return ""
 	}
 	value := base64.RawURLEncoding.EncodeToString(valueBytes)
-	http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: value, Path: "/", Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: csrfCookieName, Value: value, Path: "/", Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
 	return value
 }
 

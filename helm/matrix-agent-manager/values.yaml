@@ -49,10 +49,13 @@ config:
     redirectUrl: ""
     rolesClaim: ""
     requiredRoles: ""
+    adminRoles: ""
+    viewerRoles: ""
   cookieSecure: true
   sessionKeyFile: /var/run/secrets/matrix-agent-manager/session/session-key
   mas:
     baseUrl: ""
+    allowInsecureHTTP: false
     tokenUrl: ""
     usersUrl: ""
     personalSessionsUrl: ""
@@ -61,6 +64,11 @@ config:
   secretBackend:
     type: kubernetes
     namespace: ""
+
+agent:
+  secretNamePrefix: ""
+  tokenScope: ""
+  tokenExpirySeconds: 0
 
 secretRefs:
   # Synthetic local-development Secret name. Production overlays must replace

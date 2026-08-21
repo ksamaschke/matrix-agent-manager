@@ -62,6 +62,7 @@ func main() {
 		PersonalSessionsURL: cfg.MASPersonalSessionsURL,
 		ClientID:            cfg.MASClientID,
 		ClientSecretFile:    cfg.MASClientSecretFile,
+		AllowInsecureHTTP:   cfg.MASAllowInsecureHTTP,
 	}, nil)
 	if err != nil {
 		fatal("initialize MAS client", err)
@@ -74,18 +75,19 @@ func main() {
 	if err != nil {
 		fatal("initialize Kubernetes client", err)
 	}
-	backend, err := agents.NewKubernetesBackend(kubeClient, cfg.SecretNamespace, "matrix-agent")
+	backend, err := agents.NewKubernetesBackend(kubeClient, cfg.SecretNamespace, cfg.AgentSecretNamePrefix)
 	if err != nil {
 		fatal("initialize Kubernetes Secret backend", err)
 	}
 	service := agents.NewService(masClient, backend, agents.ServiceConfig{
-		SecretNamePrefix: "matrix-agent",
-		TokenScope:       "openid urn:matrix:client:api:*",
-		TokenExpiry:      30 * 24 * time.Hour,
+		SecretNamePrefix: cfg.AgentSecretNamePrefix,
+		TokenScope:       cfg.AgentTokenScope,
+		TokenExpiry:      time.Duration(cfg.AgentTokenExpirySeconds) * time.Second,
 	})
 	httpServer, err := httpapi.NewServer(auth, service, httpapi.ServerConfig{
-		AdminRoles:  []string{"matrix-agent-admin"},
-		ViewerRoles: []string{"matrix-agent-admin", "matrix-agent-viewer"},
+		AdminRoles:   cfg.OIDCAdminRoles,
+		ViewerRoles:  cfg.OIDCViewerRoles,
+		CookieSecure: cfg.CookieSecure,
 	})
 	if err != nil {
 		fatal("initialize HTTP API", err)

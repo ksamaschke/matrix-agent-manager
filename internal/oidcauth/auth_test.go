@@ -35,6 +35,20 @@ func TestParseRolesRejectsUnexpectedShape(t *testing.T) {
 	}
 }
 
+func TestParseNestedKeycloakRealmRoles(t *testing.T) {
+	roles, err := rolesFromClaims(map[string]any{
+		"realm_access": map[string]any{
+			"roles": []any{"matrix-agent-admin"},
+		},
+	}, "realm_access.roles")
+	if err != nil {
+		t.Fatalf("rolesFromClaims() error = %v", err)
+	}
+	if len(roles) != 1 || roles[0] != "matrix-agent-admin" {
+		t.Fatalf("roles = %#v", roles)
+	}
+}
+
 func TestAuthenticatorStateIsOpaqueAndBoundToCallback(t *testing.T) {
 	clock := time.Unix(1_700_000_000, 0)
 	codec, err := session.NewKey(strings.Repeat("k", 32), func() time.Time { return clock })

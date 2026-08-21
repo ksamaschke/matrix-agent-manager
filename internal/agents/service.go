@@ -269,6 +269,13 @@ func (s *Service) Remove(ctx context.Context, name string) (Result, error) {
 			return Result{}, fmt.Errorf("deactivate MAS user: %w", err)
 		}
 		if err := s.secrets.DeleteAgent(ctx, name); err != nil {
+			record.SessionID = ""
+			record.AccessToken = ""
+			record.Status = StatusDeactivated
+			record.UpdatedAt = s.now()
+			if clearErr := s.secrets.UpdateAgent(ctx, record); clearErr != nil {
+				return Result{}, fmt.Errorf("delete agent Secret: %w; clear token material: %v", err, clearErr)
+			}
 			return Result{}, fmt.Errorf("delete agent Secret: %w", err)
 		}
 		record.SessionID = ""

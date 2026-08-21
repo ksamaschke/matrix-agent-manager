@@ -17,8 +17,6 @@ maintainers: []
 
 annotations:
   artifacthub.io/license: Apache-2.0
-  artifacthub.io/operator: "true"
-  artifacthub.io/operatorCapabilities: Basic Install
   artifacthub.io/links: |
     - name: Documentation
       url: https://github.com/ksamaschke/matrix-agent-manager

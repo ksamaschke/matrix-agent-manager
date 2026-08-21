@@ -16,7 +16,9 @@ type fakeAuth struct {
 	identity oidcauth.Identity
 }
 
-func (f *fakeAuth) LoginURL() (string, error) { return "https://idp.example.invalid/auth", nil }
+func (f *fakeAuth) LoginURL() (string, error) {
+	return "https://idp.example.invalid/auth?state=synthetic-state", nil
+}
 func (f *fakeAuth) Complete(context.Context, string, string) (oidcauth.Identity, *http.Cookie, error) {
 	return f.identity, &http.Cookie{Name: "agent_manager_session", Value: "synthetic-session", HttpOnly: true}, nil
 }
@@ -131,6 +133,50 @@ func TestHTTPRemoveRequiresCSRFAndAdmin(t *testing.T) {
 	server.NewHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("remove status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHTTPOIDCCallbackRequiresBrowserBoundState(t *testing.T) {
+	server, _ := newTestHTTPServer(t, oidcauth.Identity{Subject: "admin", Roles: []string{"admin"}})
+
+	loginReq := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
+	loginRec := httptest.NewRecorder()
+	server.NewHandler().ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusFound {
+		t.Fatalf("login status = %d", loginRec.Code)
+	}
+	cookies := loginRec.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != oidcStateCookieName || cookies[0].Value != "synthetic-state" {
+		t.Fatalf("login cookies = %#v", cookies)
+	}
+
+	callback := httptest.NewRequest(http.MethodGet, "/auth/callback?state=synthetic-state&code=synthetic-code", nil)
+	callbackRec := httptest.NewRecorder()
+	server.NewHandler().ServeHTTP(callbackRec, callback)
+	if callbackRec.Code != http.StatusUnauthorized {
+		t.Fatalf("callback without state cookie status = %d", callbackRec.Code)
+	}
+
+	callback = httptest.NewRequest(http.MethodGet, "/auth/callback?state=synthetic-state&code=synthetic-code", nil)
+	callback.AddCookie(cookies[0])
+	callbackRec = httptest.NewRecorder()
+	server.NewHandler().ServeHTTP(callbackRec, callback)
+	if callbackRec.Code != http.StatusFound {
+		t.Fatalf("callback with state cookie status = %d, body=%s", callbackRec.Code, callbackRec.Body.String())
+	}
+}
+
+func TestHTTPIndexUsesNonceBoundCSP(t *testing.T) {
+	server, _ := newTestHTTPServer(t, oidcauth.Identity{Subject: "admin", Roles: []string{"admin"}})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	server.NewHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("index status = %d", rec.Code)
+	}
+	csp := rec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'nonce-") || strings.Contains(csp, "script-src 'unsafe-inline'") {
+		t.Fatalf("CSP = %q", csp)
 	}
 }
 

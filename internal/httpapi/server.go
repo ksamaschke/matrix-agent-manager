@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ksamaschke/matrix-agent-manager/internal/agents"
@@ -17,6 +18,8 @@ import (
 )
 
 const defaultCSRFCookieName = "agent_manager_csrf"
+
+const oidcStateCookieName = "agent_manager_oidc_state"
 
 // csrfCookieName is retained for package-level tests and defaults.
 const csrfCookieName = defaultCSRFCookieName
@@ -117,15 +120,37 @@ func health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	url, err := s.auth.LoginURL()
+	loginURL, err := s.auth.LoginURL()
 	if err != nil {
 		http.Error(w, "login unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	http.Redirect(w, r, url, http.StatusFound)
+	parsed, err := url.Parse(loginURL)
+	if err != nil || parsed.Query().Get("state") == "" {
+		http.Error(w, "login unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     oidcStateCookieName,
+		Value:    parsed.Query().Get("state"),
+		Path:     "/auth",
+		HttpOnly: true,
+		Secure:   s.cookieSecure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   5 * 60,
+	})
+	http.Redirect(w, r, loginURL, http.StatusFound)
 }
 
 func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
+	stateCookie, cookieErr := r.Cookie(oidcStateCookieName)
+	state := r.URL.Query().Get("state")
+	validState := cookieErr == nil && state != "" && subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(state)) == 1
+	http.SetCookie(w, &http.Cookie{Name: oidcStateCookieName, Value: "", Path: "/auth", MaxAge: -1, HttpOnly: true, Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
+	if !validState {
+		http.Error(w, "OIDC login failed", http.StatusUnauthorized)
+		return
+	}
 	if errCode := r.URL.Query().Get("error"); errCode != "" {
 		http.Error(w, "OIDC login denied", http.StatusUnauthorized)
 		return

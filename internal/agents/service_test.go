@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,5 +184,14 @@ func TestDeactivateRevokesThenRemovesTokenMaterial(t *testing.T) {
 	stored, _ := secrets.GetAgent(context.Background(), "codex")
 	if stored.AccessToken != "" {
 		t.Fatal("token material remains after deactivation")
+	}
+}
+
+func TestAgentNameMatchesKubernetesLabelConstraints(t *testing.T) {
+	service, _, _ := newTestService()
+	for _, name := range []string{"ends-with-", strings.Repeat("a", 64)} {
+		if _, err := service.Create(context.Background(), CreateRequest{AgentName: name, DisplayName: "Invalid"}); err == nil {
+			t.Fatalf("Create() accepted invalid agent name %q", name)
+		}
 	}
 }

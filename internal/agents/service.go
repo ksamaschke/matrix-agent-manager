@@ -197,13 +197,13 @@ func resultFromRecord(record SecretRecord, includeToken bool) Result {
 
 func validateAgentName(name string) (string, error) {
 	name = strings.TrimSpace(name)
-	if name == "" || len(name) > 64 {
-		return "", errors.New("agent name must be 1-64 characters")
+	if name == "" || len(name) > 63 {
+		return "", errors.New("agent name must be 1-63 characters")
 	}
 	for i, r := range name {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			if i == 0 && r == '-' {
-				return "", errors.New("agent name must start with a letter or digit")
+			if (i == 0 || i == len(name)-1) && r == '-' {
+				return "", errors.New("agent name must start and end with a letter or digit")
 			}
 			continue
 		}

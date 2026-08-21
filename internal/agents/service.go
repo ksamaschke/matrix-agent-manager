@@ -163,9 +163,11 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, er
 }
 
 func (s *Service) Rotate(ctx context.Context, name string) (Result, error) {
-	if _, err := validateAgentName(name); err != nil {
+	canonicalName, err := validateAgentName(name)
+	if err != nil {
 		return Result{}, err
 	}
+	name = canonicalName
 	return s.withAgentLock(name, func() (Result, error) {
 		record, err := s.secrets.GetAgent(ctx, name)
 		if err != nil {
@@ -227,9 +229,11 @@ func (s *Service) Rotate(ctx context.Context, name string) (Result, error) {
 // Revoke invalidates every active personal session but keeps the MAS account and
 // metadata. A later Rotate can issue a fresh token for the same named agent.
 func (s *Service) Revoke(ctx context.Context, name string) (Result, error) {
-	if _, err := validateAgentName(name); err != nil {
+	canonicalName, err := validateAgentName(name)
+	if err != nil {
 		return Result{}, err
 	}
+	name = canonicalName
 	return s.withAgentLock(name, func() (Result, error) {
 		record, err := s.secrets.GetAgent(ctx, name)
 		if err != nil {
@@ -258,9 +262,11 @@ func (s *Service) Revoke(ctx context.Context, name string) (Result, error) {
 }
 
 func (s *Service) Deactivate(ctx context.Context, name string) (Result, error) {
-	if _, err := validateAgentName(name); err != nil {
+	canonicalName, err := validateAgentName(name)
+	if err != nil {
 		return Result{}, err
 	}
+	name = canonicalName
 	return s.withAgentLock(name, func() (Result, error) {
 		record, err := s.secrets.GetAgent(ctx, name)
 		if err != nil {
@@ -294,9 +300,11 @@ func (s *Service) Deactivate(ctx context.Context, name string) (Result, error) {
 // Remove revokes every active personal session, deactivates the MAS user, and
 // deletes local token material. Local deletion happens only after MAS succeeds.
 func (s *Service) Remove(ctx context.Context, name string) (Result, error) {
-	if _, err := validateAgentName(name); err != nil {
+	canonicalName, err := validateAgentName(name)
+	if err != nil {
 		return Result{}, err
 	}
+	name = canonicalName
 	return s.withAgentLock(name, func() (Result, error) {
 		record, err := s.secrets.GetAgent(ctx, name)
 		if err != nil {

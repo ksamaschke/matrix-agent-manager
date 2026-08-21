@@ -84,6 +84,7 @@ type Authenticator struct {
 	cookieName    string
 	cookieSecure  bool
 	sessionTTL    time.Duration
+	httpClient    *http.Client
 }
 
 // New discovers the configured OIDC provider and prepares strict token validation.
@@ -162,6 +163,7 @@ func New(ctx context.Context, config Config) (*Authenticator, error) {
 		cookieName:    cookieName,
 		cookieSecure:  config.CookieSecure,
 		sessionTTL:    config.SessionTTL,
+		httpClient:    httpClient,
 	}, nil
 }
 
@@ -193,6 +195,7 @@ func (a *Authenticator) Complete(ctx context.Context, state, code string) (Ident
 	if err != nil {
 		return Identity{}, nil, err
 	}
+	ctx = oidc.ClientContext(ctx, a.httpClient)
 	token, err := a.oauth.Exchange(ctx, code, oauth2.VerifierOption(stateData.Verifier))
 	if err != nil {
 		return Identity{}, nil, fmt.Errorf("exchange OIDC authorization code: %w", err)

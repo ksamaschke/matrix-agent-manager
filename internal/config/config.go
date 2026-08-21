@@ -120,16 +120,24 @@ func Load(get Lookup) (Config, error) {
 		}
 	}
 	for name, raw := range map[string]string{
-		"AGENT_MANAGER_OIDC_ISSUER_URL":           cfg.OIDCIssuerURL,
-		"AGENT_MANAGER_OIDC_REDIRECT_URL":         cfg.OIDCRedirectURL,
+		"AGENT_MANAGER_OIDC_ISSUER_URL":   cfg.OIDCIssuerURL,
+		"AGENT_MANAGER_OIDC_REDIRECT_URL": cfg.OIDCRedirectURL,
+	} {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+			return Config{}, fmt.Errorf("%s must be an absolute https URL without userinfo", name)
+		}
+	}
+	for name, raw := range map[string]string{
 		"AGENT_MANAGER_MAS_BASE_URL":              cfg.MASBaseURL,
 		"AGENT_MANAGER_MAS_TOKEN_URL":             cfg.MASTokenURL,
 		"AGENT_MANAGER_MAS_USERS_URL":             cfg.MASUsersURL,
 		"AGENT_MANAGER_MAS_PERSONAL_SESSIONS_URL": cfg.MASPersonalSessionsURL,
 	} {
 		u, err := url.Parse(raw)
-		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
-			return Config{}, fmt.Errorf("%s must be an absolute https URL without userinfo", name)
+		secure := u.Scheme == "https" || (cfg.MASAllowInsecureHTTP && u.Scheme == "http")
+		if err != nil || !secure || u.Host == "" || u.User != nil {
+			return Config{}, fmt.Errorf("%s must be an absolute HTTPS URL, or HTTP only when MASAllowInsecureHTTP is true", name)
 		}
 	}
 	if cfg.SecretBackend != "kubernetes" {

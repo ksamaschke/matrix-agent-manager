@@ -2,8 +2,8 @@ apiVersion: v2
 name: matrix-agent-manager
 description: Open-source control plane for managing Matrix-based agents
 type: application
-version: 0.1.5
-appVersion: 0.1.5
+version: 0.1.6
+appVersion: 0.1.6
 home: https://github.com/ksamaschke/matrix-agent-manager
 sources:
   - https://github.com/ksamaschke/matrix-agent-manager

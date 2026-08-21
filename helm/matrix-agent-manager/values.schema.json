@@ -26,13 +26,16 @@
         "httpAddr": { "type": "string", "minLength": 1 },
         "oidc": {
           "type": "object",
-          "required": ["issuerUrl", "clientId", "audience", "requiredRoles"],
           "properties": {
             "issuerUrl": { "type": "string" },
             "clientId": { "type": "string" },
             "audience": { "type": "string" },
-            "requiredRoles": { "type": "array", "items": { "type": "string" } }
-          }
+            "clientSecretFile": { "type": "string", "minLength": 1 },
+            "redirectUrl": { "type": "string" },
+            "rolesClaim": { "type": "string" },
+            "requiredRoles": { "type": "string" }
+          },
+          "required": ["issuerUrl", "clientId", "audience", "clientSecretFile", "redirectUrl", "rolesClaim", "requiredRoles"]
         },
         "mas": {
           "type": "object",
@@ -61,6 +64,22 @@
       "required": ["masClientSecret"],
       "properties": {
         "masClientSecret": {
+          "type": "object",
+          "required": ["name", "key"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "key": { "type": "string", "minLength": 1 }
+          }
+        },
+        "oidcClientSecret": {
+          "type": "object",
+          "required": ["name", "key"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "key": { "type": "string", "minLength": 1 }
+          }
+        },
+        "sessionKey": {
           "type": "object",
           "required": ["name", "key"],
           "properties": {

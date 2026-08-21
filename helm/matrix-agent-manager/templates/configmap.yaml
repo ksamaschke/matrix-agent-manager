@@ -13,6 +13,12 @@ data:
   AGENT_MANAGER_OIDC_ISSUER_URL: {{ .Values.config.oidc.issuerUrl | quote }}
   AGENT_MANAGER_OIDC_CLIENT_ID: {{ .Values.config.oidc.clientId | quote }}
   AGENT_MANAGER_OIDC_AUDIENCE: {{ .Values.config.oidc.audience | quote }}
+  AGENT_MANAGER_OIDC_CLIENT_SECRET_FILE: {{ .Values.config.oidc.clientSecretFile | quote }}
+  AGENT_MANAGER_OIDC_REDIRECT_URL: {{ .Values.config.oidc.redirectUrl | quote }}
+  AGENT_MANAGER_OIDC_ROLES_CLAIM: {{ .Values.config.oidc.rolesClaim | quote }}
+  AGENT_MANAGER_OIDC_REQUIRED_ROLES: {{ .Values.config.oidc.requiredRoles | quote }}
+  AGENT_MANAGER_COOKIE_SECURE: {{ .Values.config.cookieSecure | quote }}
+  AGENT_MANAGER_SESSION_KEY_FILE: {{ .Values.config.sessionKeyFile | quote }}
   AGENT_MANAGER_MAS_BASE_URL: {{ .Values.config.mas.baseUrl | quote }}
   AGENT_MANAGER_MAS_TOKEN_URL: {{ .Values.config.mas.tokenUrl | quote }}
   AGENT_MANAGER_MAS_USERS_URL: {{ .Values.config.mas.usersUrl | quote }}

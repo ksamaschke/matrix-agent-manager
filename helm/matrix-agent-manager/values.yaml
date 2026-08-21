@@ -45,14 +45,19 @@ config:
     issuerUrl: ""
     clientId: ""
     audience: ""
-    requiredRoles: []
+    clientSecretFile: /var/run/secrets/matrix-agent-manager/oidc/client-secret
+    redirectUrl: ""
+    rolesClaim: ""
+    requiredRoles: ""
+  cookieSecure: true
+  sessionKeyFile: /var/run/secrets/matrix-agent-manager/session/session-key
   mas:
     baseUrl: ""
     tokenUrl: ""
     usersUrl: ""
     personalSessionsUrl: ""
     clientId: ""
-    clientSecretFile: /var/run/secrets/matrix-agent-manager/mas-client-secret
+    clientSecretFile: /var/run/secrets/matrix-agent-manager/mas/client-secret
   secretBackend:
     type: kubernetes
     namespace: ""
@@ -63,6 +68,12 @@ secretRefs:
   masClientSecret:
     name: matrix-agent-manager-mas-client
     key: client-secret
+  oidcClientSecret:
+    name: matrix-agent-manager-oidc-client
+    key: client-secret
+  sessionKey:
+    name: matrix-agent-manager-session
+    key: session-key
 
 operator:
   enabled: false

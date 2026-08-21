@@ -42,7 +42,13 @@ spec:
               value: {{ .Values.config.mas.clientSecretFile | quote }}
           volumeMounts:
             - name: mas-client-secret
-              mountPath: /var/run/secrets/matrix-agent-manager
+              mountPath: /var/run/secrets/matrix-agent-manager/mas
+              readOnly: true
+            - name: oidc-client-secret
+              mountPath: /var/run/secrets/matrix-agent-manager/oidc
+              readOnly: true
+            - name: session-key
+              mountPath: /var/run/secrets/matrix-agent-manager/session
               readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
@@ -73,3 +79,15 @@ spec:
             items:
               - key: {{ .Values.secretRefs.masClientSecret.key | quote }}
                 path: client-secret
+        - name: oidc-client-secret
+          secret:
+            secretName: {{ .Values.secretRefs.oidcClientSecret.name | quote }}
+            items:
+              - key: {{ .Values.secretRefs.oidcClientSecret.key | quote }}
+                path: client-secret
+        - name: session-key
+          secret:
+            secretName: {{ .Values.secretRefs.sessionKey.name | quote }}
+            items:
+              - key: {{ .Values.secretRefs.sessionKey.key | quote }}
+                path: session-key

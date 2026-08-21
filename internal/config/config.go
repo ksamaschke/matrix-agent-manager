@@ -16,9 +16,15 @@ type Config struct {
 	Environment string
 	HTTPAddr    string
 
-	OIDCIssuerURL string
-	OIDCClientID  string
-	OIDCAudience  string
+	OIDCIssuerURL        string
+	OIDCClientID         string
+	OIDCAudience         string
+	OIDCClientSecretFile string
+	OIDCRedirectURL      string
+	OIDCRolesClaim       string
+	OIDCRequiredRoles    []string
+	CookieSecure         bool
+	SessionKeyFile       string
 
 	MASBaseURL             string
 	MASTokenURL            string
@@ -45,6 +51,12 @@ func Load(get Lookup) (Config, error) {
 		OIDCIssuerURL:          get("AGENT_MANAGER_OIDC_ISSUER_URL"),
 		OIDCClientID:           get("AGENT_MANAGER_OIDC_CLIENT_ID"),
 		OIDCAudience:           get("AGENT_MANAGER_OIDC_AUDIENCE"),
+		OIDCClientSecretFile:   get("AGENT_MANAGER_OIDC_CLIENT_SECRET_FILE"),
+		OIDCRedirectURL:        get("AGENT_MANAGER_OIDC_REDIRECT_URL"),
+		OIDCRolesClaim:         get("AGENT_MANAGER_OIDC_ROLES_CLAIM"),
+		OIDCRequiredRoles:      splitCSV(get("AGENT_MANAGER_OIDC_REQUIRED_ROLES")),
+		CookieSecure:           valueOr(get("AGENT_MANAGER_COOKIE_SECURE"), "false") == "true",
+		SessionKeyFile:         get("AGENT_MANAGER_SESSION_KEY_FILE"),
 		MASBaseURL:             get("AGENT_MANAGER_MAS_BASE_URL"),
 		MASTokenURL:            get("AGENT_MANAGER_MAS_TOKEN_URL"),
 		MASUsersURL:            get("AGENT_MANAGER_MAS_USERS_URL"),
@@ -66,6 +78,10 @@ func Load(get Lookup) (Config, error) {
 		"AGENT_MANAGER_OIDC_ISSUER_URL":           cfg.OIDCIssuerURL,
 		"AGENT_MANAGER_OIDC_CLIENT_ID":            cfg.OIDCClientID,
 		"AGENT_MANAGER_OIDC_AUDIENCE":             cfg.OIDCAudience,
+		"AGENT_MANAGER_OIDC_CLIENT_SECRET_FILE":   cfg.OIDCClientSecretFile,
+		"AGENT_MANAGER_OIDC_REDIRECT_URL":         cfg.OIDCRedirectURL,
+		"AGENT_MANAGER_OIDC_ROLES_CLAIM":          cfg.OIDCRolesClaim,
+		"AGENT_MANAGER_SESSION_KEY_FILE":          cfg.SessionKeyFile,
 		"AGENT_MANAGER_MAS_BASE_URL":              cfg.MASBaseURL,
 		"AGENT_MANAGER_MAS_TOKEN_URL":             cfg.MASTokenURL,
 		"AGENT_MANAGER_MAS_USERS_URL":             cfg.MASUsersURL,
@@ -82,6 +98,7 @@ func Load(get Lookup) (Config, error) {
 	}
 	for name, raw := range map[string]string{
 		"AGENT_MANAGER_OIDC_ISSUER_URL":           cfg.OIDCIssuerURL,
+		"AGENT_MANAGER_OIDC_REDIRECT_URL":         cfg.OIDCRedirectURL,
 		"AGENT_MANAGER_MAS_BASE_URL":              cfg.MASBaseURL,
 		"AGENT_MANAGER_MAS_TOKEN_URL":             cfg.MASTokenURL,
 		"AGENT_MANAGER_MAS_USERS_URL":             cfg.MASUsersURL,
@@ -95,6 +112,12 @@ func Load(get Lookup) (Config, error) {
 	if cfg.SecretBackend != "kubernetes" {
 		return Config{}, fmt.Errorf("production secret backend must be kubernetes, got %q", cfg.SecretBackend)
 	}
+	if len(cfg.OIDCRequiredRoles) == 0 {
+		return Config{}, errors.New("AGENT_MANAGER_OIDC_REQUIRED_ROLES must contain at least one role in production")
+	}
+	if !cfg.CookieSecure {
+		return Config{}, errors.New("AGENT_MANAGER_COOKIE_SECURE must be true in production")
+	}
 	return cfg, nil
 }
 
@@ -103,4 +126,15 @@ func valueOr(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

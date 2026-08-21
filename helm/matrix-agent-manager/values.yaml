@@ -48,6 +48,9 @@ config:
     requiredRoles: []
   mas:
     baseUrl: ""
+    tokenUrl: ""
+    usersUrl: ""
+    personalSessionsUrl: ""
     clientId: ""
     clientSecretFile: /var/run/secrets/matrix-agent-manager/mas-client-secret
   secretBackend:

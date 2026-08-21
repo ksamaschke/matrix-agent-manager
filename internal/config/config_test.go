@@ -32,15 +32,18 @@ func TestLoadAcceptsDevelopmentConfigurationWithoutExternalServices(t *testing.T
 
 func TestLoadUsesConfiguredValuesWithoutLoggingSecrets(t *testing.T) {
 	env := map[string]string{
-		"AGENT_MANAGER_ENV":                    "production",
-		"AGENT_MANAGER_OIDC_ISSUER_URL":        "https://idp.example.invalid/realms/example",
-		"AGENT_MANAGER_OIDC_CLIENT_ID":         "agent-manager",
-		"AGENT_MANAGER_OIDC_AUDIENCE":          "agent-manager",
-		"AGENT_MANAGER_MAS_BASE_URL":           "https://mas.example.invalid",
-		"AGENT_MANAGER_MAS_CLIENT_ID":          "agent-manager-admin",
-		"AGENT_MANAGER_MAS_CLIENT_SECRET_FILE": "/var/run/secrets/mas/client-secret",
-		"AGENT_MANAGER_SECRET_BACKEND":         "kubernetes",
-		"AGENT_MANAGER_SECRET_NAMESPACE":       "agent-manager",
+		"AGENT_MANAGER_ENV":                       "production",
+		"AGENT_MANAGER_OIDC_ISSUER_URL":           "https://idp.example.invalid/realms/example",
+		"AGENT_MANAGER_OIDC_CLIENT_ID":            "agent-manager",
+		"AGENT_MANAGER_OIDC_AUDIENCE":             "agent-manager",
+		"AGENT_MANAGER_MAS_BASE_URL":              "https://mas.example.invalid",
+		"AGENT_MANAGER_MAS_TOKEN_URL":             "https://mas.example.invalid/oauth2/token",
+		"AGENT_MANAGER_MAS_USERS_URL":             "https://mas.example.invalid/api/admin/v1/users",
+		"AGENT_MANAGER_MAS_PERSONAL_SESSIONS_URL": "https://mas.example.invalid/api/admin/v1/personal-sessions",
+		"AGENT_MANAGER_MAS_CLIENT_ID":             "agent-manager-admin",
+		"AGENT_MANAGER_MAS_CLIENT_SECRET_FILE":    "/var/run/secrets/mas/client-secret",
+		"AGENT_MANAGER_SECRET_BACKEND":            "kubernetes",
+		"AGENT_MANAGER_SECRET_NAMESPACE":          "agent-manager",
 	}
 
 	cfg, err := Load(envLookup(env))

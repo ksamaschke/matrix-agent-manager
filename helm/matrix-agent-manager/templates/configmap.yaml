@@ -14,6 +14,9 @@ data:
   AGENT_MANAGER_OIDC_CLIENT_ID: {{ .Values.config.oidc.clientId | quote }}
   AGENT_MANAGER_OIDC_AUDIENCE: {{ .Values.config.oidc.audience | quote }}
   AGENT_MANAGER_MAS_BASE_URL: {{ .Values.config.mas.baseUrl | quote }}
+  AGENT_MANAGER_MAS_TOKEN_URL: {{ .Values.config.mas.tokenUrl | quote }}
+  AGENT_MANAGER_MAS_USERS_URL: {{ .Values.config.mas.usersUrl | quote }}
+  AGENT_MANAGER_MAS_PERSONAL_SESSIONS_URL: {{ .Values.config.mas.personalSessionsUrl | quote }}
   AGENT_MANAGER_MAS_CLIENT_ID: {{ .Values.config.mas.clientId | quote }}
   AGENT_MANAGER_MAS_CLIENT_SECRET_FILE: {{ .Values.config.mas.clientSecretFile | quote }}
   AGENT_MANAGER_SECRET_BACKEND: {{ .Values.config.secretBackend.type | quote }}

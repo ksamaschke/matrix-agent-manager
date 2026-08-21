@@ -36,9 +36,12 @@
         },
         "mas": {
           "type": "object",
-          "required": ["baseUrl", "clientId", "clientSecretFile"],
+          "required": ["baseUrl", "tokenUrl", "usersUrl", "personalSessionsUrl", "clientId", "clientSecretFile"],
           "properties": {
             "baseUrl": { "type": "string" },
+            "tokenUrl": { "type": "string" },
+            "usersUrl": { "type": "string" },
+            "personalSessionsUrl": { "type": "string" },
             "clientId": { "type": "string" },
             "clientSecretFile": { "type": "string", "minLength": 1 }
           }

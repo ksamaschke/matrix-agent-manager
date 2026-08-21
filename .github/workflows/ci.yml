@@ -37,5 +37,4 @@ jobs:
         with:
           fetch-depth: 0
       - name: Reject deployment-specific literals and private material
-        run: |
-          ! git grep -nE 'samaschke\.de|vanillacore|auth\.vanillacore\.net|matrix\.home|admin\.matrix|BEGIN (RSA |OPENSSH |EC )?PRIVATE KEY|Bearer [A-Za-z0-9._-]{20,}' -- ':!SECURITY.md'
+        run: python3 .github/scripts/source_hygiene.py

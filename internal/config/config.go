@@ -20,9 +20,12 @@ type Config struct {
 	OIDCClientID  string
 	OIDCAudience  string
 
-	MASBaseURL          string
-	MASClientID         string
-	MASClientSecretFile string
+	MASBaseURL             string
+	MASTokenURL            string
+	MASUsersURL            string
+	MASPersonalSessionsURL string
+	MASClientID            string
+	MASClientSecretFile    string
 
 	SecretBackend   string
 	SecretNamespace string
@@ -37,16 +40,19 @@ func Load(get Lookup) (Config, error) {
 	}
 
 	cfg := Config{
-		Environment:         valueOr(get("AGENT_MANAGER_ENV"), "development"),
-		HTTPAddr:            valueOr(get("AGENT_MANAGER_HTTP_ADDR"), ":8080"),
-		OIDCIssuerURL:       get("AGENT_MANAGER_OIDC_ISSUER_URL"),
-		OIDCClientID:        get("AGENT_MANAGER_OIDC_CLIENT_ID"),
-		OIDCAudience:        get("AGENT_MANAGER_OIDC_AUDIENCE"),
-		MASBaseURL:          get("AGENT_MANAGER_MAS_BASE_URL"),
-		MASClientID:         get("AGENT_MANAGER_MAS_CLIENT_ID"),
-		MASClientSecretFile: get("AGENT_MANAGER_MAS_CLIENT_SECRET_FILE"),
-		SecretBackend:       valueOr(get("AGENT_MANAGER_SECRET_BACKEND"), "memory"),
-		SecretNamespace:     get("AGENT_MANAGER_SECRET_NAMESPACE"),
+		Environment:            valueOr(get("AGENT_MANAGER_ENV"), "development"),
+		HTTPAddr:               valueOr(get("AGENT_MANAGER_HTTP_ADDR"), ":8080"),
+		OIDCIssuerURL:          get("AGENT_MANAGER_OIDC_ISSUER_URL"),
+		OIDCClientID:           get("AGENT_MANAGER_OIDC_CLIENT_ID"),
+		OIDCAudience:           get("AGENT_MANAGER_OIDC_AUDIENCE"),
+		MASBaseURL:             get("AGENT_MANAGER_MAS_BASE_URL"),
+		MASTokenURL:            get("AGENT_MANAGER_MAS_TOKEN_URL"),
+		MASUsersURL:            get("AGENT_MANAGER_MAS_USERS_URL"),
+		MASPersonalSessionsURL: get("AGENT_MANAGER_MAS_PERSONAL_SESSIONS_URL"),
+		MASClientID:            get("AGENT_MANAGER_MAS_CLIENT_ID"),
+		MASClientSecretFile:    get("AGENT_MANAGER_MAS_CLIENT_SECRET_FILE"),
+		SecretBackend:          valueOr(get("AGENT_MANAGER_SECRET_BACKEND"), "memory"),
+		SecretNamespace:        get("AGENT_MANAGER_SECRET_NAMESPACE"),
 	}
 
 	if cfg.Environment != "development" && cfg.Environment != "test" && cfg.Environment != "production" {
@@ -57,14 +63,17 @@ func Load(get Lookup) (Config, error) {
 	}
 
 	required := map[string]string{
-		"AGENT_MANAGER_OIDC_ISSUER_URL":        cfg.OIDCIssuerURL,
-		"AGENT_MANAGER_OIDC_CLIENT_ID":         cfg.OIDCClientID,
-		"AGENT_MANAGER_OIDC_AUDIENCE":          cfg.OIDCAudience,
-		"AGENT_MANAGER_MAS_BASE_URL":           cfg.MASBaseURL,
-		"AGENT_MANAGER_MAS_CLIENT_ID":          cfg.MASClientID,
-		"AGENT_MANAGER_MAS_CLIENT_SECRET_FILE": cfg.MASClientSecretFile,
-		"AGENT_MANAGER_SECRET_BACKEND":         cfg.SecretBackend,
-		"AGENT_MANAGER_SECRET_NAMESPACE":       cfg.SecretNamespace,
+		"AGENT_MANAGER_OIDC_ISSUER_URL":           cfg.OIDCIssuerURL,
+		"AGENT_MANAGER_OIDC_CLIENT_ID":            cfg.OIDCClientID,
+		"AGENT_MANAGER_OIDC_AUDIENCE":             cfg.OIDCAudience,
+		"AGENT_MANAGER_MAS_BASE_URL":              cfg.MASBaseURL,
+		"AGENT_MANAGER_MAS_TOKEN_URL":             cfg.MASTokenURL,
+		"AGENT_MANAGER_MAS_USERS_URL":             cfg.MASUsersURL,
+		"AGENT_MANAGER_MAS_PERSONAL_SESSIONS_URL": cfg.MASPersonalSessionsURL,
+		"AGENT_MANAGER_MAS_CLIENT_ID":             cfg.MASClientID,
+		"AGENT_MANAGER_MAS_CLIENT_SECRET_FILE":    cfg.MASClientSecretFile,
+		"AGENT_MANAGER_SECRET_BACKEND":            cfg.SecretBackend,
+		"AGENT_MANAGER_SECRET_NAMESPACE":          cfg.SecretNamespace,
 	}
 	for name, value := range required {
 		if strings.TrimSpace(value) == "" {
@@ -72,8 +81,11 @@ func Load(get Lookup) (Config, error) {
 		}
 	}
 	for name, raw := range map[string]string{
-		"AGENT_MANAGER_OIDC_ISSUER_URL": cfg.OIDCIssuerURL,
-		"AGENT_MANAGER_MAS_BASE_URL":    cfg.MASBaseURL,
+		"AGENT_MANAGER_OIDC_ISSUER_URL":           cfg.OIDCIssuerURL,
+		"AGENT_MANAGER_MAS_BASE_URL":              cfg.MASBaseURL,
+		"AGENT_MANAGER_MAS_TOKEN_URL":             cfg.MASTokenURL,
+		"AGENT_MANAGER_MAS_USERS_URL":             cfg.MASUsersURL,
+		"AGENT_MANAGER_MAS_PERSONAL_SESSIONS_URL": cfg.MASPersonalSessionsURL,
 	} {
 		u, err := url.Parse(raw)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {

@@ -41,6 +41,10 @@ func (f *fakeMAS) ReactivateUser(_ context.Context, id string) (mas.User, error)
 	return mas.User{Type: "user", ID: id}, nil
 }
 
+func (f *fakeMAS) ListUsers(_ context.Context, _ string) ([]mas.User, error) {
+	return nil, nil
+}
+
 func (f *fakeMAS) CreatePersonalSession(_ context.Context, request mas.CreatePersonalSessionRequest) (mas.PersonalSession, error) {
 	id := "session-" + request.ActorUserID + "-" + string(rune('0'+len(f.sessions)))
 	session := mas.PersonalSession{Type: "personal-session", ID: id, Attributes: mas.PersonalSessionAttributes{

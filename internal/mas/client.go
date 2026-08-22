@@ -136,6 +136,13 @@ type paginatedSessionsResponse struct {
 	} `json:"links"`
 }
 
+type paginatedUsersResponse struct {
+	Data  []resource[UserAttributes] `json:"data"`
+	Links struct {
+		Next string `json:"next"`
+	} `json:"links"`
+}
+
 // NewClient validates the configured trust boundaries before creating a client.
 func NewClient(config ClientConfig, readSecret SecretReader) (*Client, error) {
 	for name, raw := range map[string]string{
@@ -224,6 +231,44 @@ func (c *Client) ReactivateUser(ctx context.Context, id string) (User, error) {
 		return User{}, err
 	}
 	return User{Type: response.Data.Type, ID: response.Data.ID, Attributes: response.Data.Attributes}, nil
+}
+
+// ListUsers lists MAS users with a bounded, same-origin pagination walk.
+func (c *Client) ListUsers(ctx context.Context, status string) ([]User, error) {
+	if status != "active" && status != "locked" && status != "deactivated" {
+		return nil, errors.New("MAS user status filter is invalid")
+	}
+	endpoint, err := url.Parse(c.config.UsersURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse MAS users URL: %w", err)
+	}
+	query := endpoint.Query()
+	query.Set("filter[status]", status)
+	query.Set("page[first]", "100")
+	endpoint.RawQuery = query.Encode()
+	result := make([]User, 0)
+	for page := 0; page < 100 && endpoint != nil; page++ {
+		var response paginatedUsersResponse
+		if err := c.doJSON(ctx, http.MethodGet, endpoint.String(), nil, &response); err != nil {
+			return nil, err
+		}
+		for _, item := range response.Data {
+			result = append(result, User{Type: item.Type, ID: item.ID, Attributes: item.Attributes})
+		}
+		if response.Links.Next == "" {
+			return result, nil
+		}
+		next, err := url.Parse(response.Links.Next)
+		if err != nil {
+			return nil, errors.New("MAS user pagination link is invalid")
+		}
+		next = endpoint.ResolveReference(next)
+		if next.Scheme != endpoint.Scheme || next.Host != endpoint.Host || next.User != nil {
+			return nil, errors.New("MAS user pagination link is not same-origin")
+		}
+		endpoint = next
+	}
+	return nil, errors.New("MAS user pagination exceeded safety limit")
 }
 
 // CreatePersonalSession creates a one-time personal access token.

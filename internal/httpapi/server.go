@@ -35,6 +35,7 @@ type Authenticator interface {
 
 type AgentService interface {
 	List(context.Context) ([]agents.Result, error)
+	ListUnmanaged(context.Context) ([]agents.UnmanagedResult, error)
 	Create(context.Context, agents.CreateRequest) (agents.Result, error)
 	Rotate(context.Context, string) (agents.Result, error)
 	Deactivate(context.Context, string) (agents.Result, error)
@@ -98,6 +99,7 @@ func (s *Server) NewHandler() http.Handler {
 	mux.HandleFunc("POST /auth/logout", s.logout)
 	mux.HandleFunc("GET /", s.index)
 	mux.HandleFunc("GET /api/agents", s.listAgents)
+	mux.HandleFunc("GET /api/unmanaged", s.listUnmanaged)
 	mux.HandleFunc("POST /api/agents", s.createAgent)
 	mux.HandleFunc("POST /api/agents/{name}/rotate", s.rotateAgent)
 	mux.HandleFunc("POST /api/agents/{name}/deactivate", s.deactivateAgent)
@@ -218,18 +220,21 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 <html lang="en"><head><meta charset="utf-8"><meta name="csrf-token" content="%s"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Matrix Agent Manager</title>
 <style>body{font:16px system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#202124}form{display:flex;gap:.5rem;flex-wrap:wrap;margin:1rem 0}input,button{font:inherit;padding:.45rem .7rem}button{cursor:pointer}.agent{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:.7rem 0}.token{background:#fff4ce;border:1px solid #e0b400;padding:1rem;white-space:pre-wrap;overflow-wrap:anywhere}.muted{color:#666}</style></head>
 <body><h1>Matrix Agent Manager</h1><p class="muted">Create and operate Matrix agent identities. Tokens are shown only immediately after creation or rotation.</p>
-<form id="create"><input name="agent_name" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="agent name"><input name="display_name" required placeholder="display name"><button>Create agent</button></form>
+<form id="create"><input name="agent_name" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="Matrix ID localpart"><input name="display_name" required placeholder="display name"><button>Create agent</button></form>
 <form method="post" action="/auth/logout"><input type="hidden" name="csrf" value="%s"><button>Log out</button></form>
-<div id="message" aria-live="polite"></div><section id="agents"><p>Loading…</p></section>
+<div id="message" aria-live="polite"></div><section id="agents"><p>Loading…</p></section><section id="unmanaged"><h2>Unmanaged deactivated MAS identities</h2><p>Loading…</p></section>
 <script nonce="%s">
 const csrf=document.querySelector('meta[name="csrf-token"]').content;
 const message=document.querySelector('#message');
 const section=document.querySelector('#agents');
+const unmanaged=document.querySelector('#unmanaged');
 function showMessage(text,token){message.replaceChildren();const p=document.createElement('p');p.textContent=text;message.append(p);if(token){const pre=document.createElement('pre');pre.className='token';pre.textContent=token;message.append(pre);}}
 async function api(path,options={}){options.headers={...(options.headers||{}),'X-CSRF-Token':csrf,'Content-Type':'application/json'};const response=await fetch(path,options);const text=await response.text();let data={};try{data=JSON.parse(text)}catch{}if(!response.ok)throw new Error(data.error||text||('HTTP '+response.status));return data;}
 async function load(){try{const list=await api('/api/agents',{headers:{}});section.replaceChildren();if(!list.length){const p=document.createElement('p');p.textContent='No agents registered.';section.append(p);return;}for(const agent of list){const card=document.createElement('article');card.className='agent';const title=document.createElement('strong');title.textContent=agent.display_name+' ('+agent.agent_name+')';card.append(title);const meta=document.createElement('p');meta.textContent='Status: '+agent.status+' · Generation: '+agent.generation;card.append(meta);if(agent.status==='active'){const rotate=document.createElement('button');rotate.textContent='Rotate token';rotate.onclick=async()=>{try{const result=await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/rotate',{method:'POST',body:'{}'});showMessage('New token for '+result.agent_name+'. Store it now; it will not be shown again.',result.one_time_token);await load()}catch(e){showMessage(e.message)}};card.append(rotate);const revoke=document.createElement('button');revoke.textContent='Revoke token';revoke.onclick=async()=>{if(!confirm('Revoke '+agent.agent_name+' token?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/revoke',{method:'POST',body:'{}'});showMessage('Agent token revoked.');await load()}catch(e){showMessage(e.message)}};card.append(revoke);const deactivate=document.createElement('button');deactivate.textContent='Deactivate';deactivate.onclick=async()=>{if(!confirm('Deactivate '+agent.agent_name+'?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/deactivate',{method:'POST',body:'{}'});showMessage('Agent deactivated.');await load()}catch(e){showMessage(e.message)}};card.append(deactivate);const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}else{const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}section.append(card)}}catch(e){showMessage(e.message)}}
+async function loadUnmanaged(){try{const list=await api('/api/unmanaged',{headers:{}});unmanaged.replaceChildren();if(!list.length){const p=document.createElement('p');p.textContent='No unmanaged deactivated MAS identities.';unmanaged.append(p);return;}const note=document.createElement('p');note.className='muted';note.textContent='These MAS identities have no Manager Secret. They are already deactivated; MAS retains their localparts as tombstones.';unmanaged.append(note);for(const item of list){const card=document.createElement('article');card.className='agent';const title=document.createElement('strong');title.textContent=item.agent_name;card.append(title);const meta=document.createElement('p');meta.textContent='Status: deactivated · Not managed by this Manager';card.append(meta);unmanaged.append(card)}}catch(e){const p=document.createElement('p');p.textContent='Unmanaged identity list unavailable';unmanaged.replaceChildren(p)}}
 document.querySelector('#create').onsubmit=async(event)=>{event.preventDefault();const form=new FormData(event.target);try{const result=await api('/api/agents',{method:'POST',body:JSON.stringify({agent_name:form.get('agent_name'),display_name:form.get('display_name')})});showMessage('Agent created. Store this token now; it will not be shown again.',result.one_time_token);event.target.reset();await load()}catch(e){showMessage(e.message)}};
 load();
+loadUnmanaged();
 </script></body></html>`, template.HTMLEscapeString(csrf), template.HTMLEscapeString(csrf), template.HTMLEscapeString(nonce))
 }
 
@@ -241,6 +246,19 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 	result, err := s.agents.List(r.Context())
 	if err != nil {
 		http.Error(w, "agent list failed", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) listUnmanaged(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.requireViewer(r); err != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	result, err := s.agents.ListUnmanaged(r.Context())
+	if err != nil {
+		http.Error(w, "unmanaged identity list failed", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)

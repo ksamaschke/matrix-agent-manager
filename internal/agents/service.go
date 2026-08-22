@@ -30,6 +30,7 @@ type MASClient interface {
 	CreateUser(context.Context, mas.CreateUserRequest) (mas.User, error)
 	GetUserByUsername(context.Context, string) (mas.User, error)
 	ReactivateUser(context.Context, string) (mas.User, error)
+	ListUsers(context.Context, string) ([]mas.User, error)
 	CreatePersonalSession(context.Context, mas.CreatePersonalSessionRequest) (mas.PersonalSession, error)
 	RegeneratePersonalSession(context.Context, string, *uint32) (mas.PersonalSession, error)
 	ListPersonalSessions(context.Context, string) ([]mas.PersonalSession, error)
@@ -89,6 +90,13 @@ type Result struct {
 	OneTimeToken string `json:"one_time_token,omitempty"`
 	Generation   int    `json:"generation"`
 	Status       Status `json:"status"`
+}
+
+type UnmanagedResult struct {
+	AgentName     string  `json:"agent_name"`
+	MASUserID     string  `json:"mas_user_id"`
+	Status        Status  `json:"status"`
+	DeactivatedAt *string `json:"deactivated_at,omitempty"`
 }
 
 func NewService(client MASClient, secrets SecretBackend, config ServiceConfig) *Service {
@@ -411,6 +419,34 @@ func (s *Service) List(ctx context.Context) ([]Result, error) {
 		results = append(results, resultFromRecord(record, false))
 	}
 	return results, nil
+}
+
+func (s *Service) ListUnmanaged(ctx context.Context) ([]UnmanagedResult, error) {
+	records, err := s.secrets.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	managed := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		managed[record.AgentName] = struct{}{}
+	}
+	users, err := s.mas.ListUsers(ctx, "deactivated")
+	if err != nil {
+		return nil, fmt.Errorf("list unmanaged MAS users: %w", err)
+	}
+	result := make([]UnmanagedResult, 0)
+	for _, user := range users {
+		name, err := validateAgentName(user.Attributes.Username)
+		if err != nil {
+			continue
+		}
+		if _, ok := managed[name]; ok {
+			continue
+		}
+		result = append(result, UnmanagedResult{AgentName: name, MASUserID: user.ID, Status: StatusDeactivated, DeactivatedAt: user.Attributes.DeactivatedAt})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].AgentName < result[j].AgentName })
+	return result, nil
 }
 
 func resultFromRecord(record SecretRecord, includeToken bool) Result {

@@ -100,7 +100,7 @@ func main() {
 	if err != nil {
 		fatal("initialize HTTP API", err)
 	}
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpServer.NewHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: httpServer.NewHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 120 * time.Second, IdleTimeout: 60 * time.Second}
 	slog.Info("starting matrix agent manager", "environment", cfg.Environment, "addr", cfg.HTTPAddr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fatal("server stopped", err)

@@ -11,15 +11,17 @@ import (
 )
 
 type fakeMAS struct {
-	users            []mas.User
-	sessions         []mas.PersonalSession
-	regenerated      []string
-	revoked          []string
-	deactivated      []string
-	failCreateSecret bool
+	users              []mas.User
+	createUserRequests []mas.CreateUserRequest
+	sessions           []mas.PersonalSession
+	regenerated        []string
+	revoked            []string
+	deactivated        []string
+	failCreateSecret   bool
 }
 
 func (f *fakeMAS) CreateUser(_ context.Context, request mas.CreateUserRequest) (mas.User, error) {
+	f.createUserRequests = append(f.createUserRequests, request)
 	user := mas.User{Type: "user", ID: "user-" + request.Username, Attributes: mas.UserAttributes{Username: request.Username}}
 	f.users = append(f.users, user)
 	return user, nil
@@ -152,6 +154,9 @@ func TestCreatePersistsBeforeReturningToken(t *testing.T) {
 	}
 	if len(fake.sessions) != 1 {
 		t.Fatalf("sessions = %d", len(fake.sessions))
+	}
+	if len(fake.createUserRequests) != 1 || !fake.createUserRequests[0].SkipHomeserverCheck {
+		t.Fatalf("create user request = %#v", fake.createUserRequests)
 	}
 }
 

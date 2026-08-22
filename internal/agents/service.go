@@ -119,7 +119,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, er
 		} else if !errors.Is(err, ErrNotFound) {
 			return Result{}, fmt.Errorf("check existing agent: %w", err)
 		}
-		user, err := s.mas.CreateUser(ctx, mas.CreateUserRequest{Username: name, DisplayName: &displayName})
+		user, err := s.mas.CreateUser(ctx, mas.CreateUserRequest{Username: name, SkipHomeserverCheck: true, DisplayName: &displayName})
 		if err != nil {
 			return Result{}, fmt.Errorf("create MAS user: %w", err)
 		}

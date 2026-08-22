@@ -36,6 +36,10 @@ type fakeAgentService struct {
 func (f *fakeAgentService) List(context.Context) ([]agents.Result, error) {
 	return []agents.Result{{AgentName: "codex", DisplayName: "Codex", Status: agents.StatusActive, Generation: 1}}, nil
 }
+func (f *fakeAgentService) ListUnmanaged(context.Context) ([]agents.UnmanagedResult, error) {
+	return nil, nil
+}
+
 func (f *fakeAgentService) Create(_ context.Context, request agents.CreateRequest) (agents.Result, error) {
 	f.created = append(f.created, request)
 	return agents.Result{AgentName: request.AgentName, DisplayName: request.DisplayName, OneTimeToken: "synthetic-token", Generation: 1, Status: agents.StatusActive}, nil

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -148,15 +149,18 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	validState := cookieErr == nil && state != "" && subtle.ConstantTimeCompare([]byte(stateCookie.Value), []byte(state)) == 1
 	http.SetCookie(w, &http.Cookie{Name: oidcStateCookieName, Value: "", Path: "/auth", MaxAge: -1, HttpOnly: true, Secure: s.cookieSecure, SameSite: http.SameSiteLaxMode})
 	if !validState {
+		log.Printf("OIDC callback rejected: missing or mismatched browser state")
 		http.Error(w, "OIDC login failed", http.StatusUnauthorized)
 		return
 	}
 	if errCode := r.URL.Query().Get("error"); errCode != "" {
+		log.Printf("OIDC provider denied login: error=%s", errCode)
 		http.Error(w, "OIDC login denied", http.StatusUnauthorized)
 		return
 	}
 	identity, cookie, err := s.auth.Complete(r.Context(), r.URL.Query().Get("state"), r.URL.Query().Get("code"))
 	if err != nil {
+		log.Printf("OIDC callback completion failed: %s", safeOIDCError(err))
 		http.Error(w, "OIDC login failed", http.StatusUnauthorized)
 		return
 	}
@@ -378,6 +382,20 @@ func (s *Server) setCSRFCookie(w http.ResponseWriter) string {
 func (s *Server) writeMutationJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, status, value)
+}
+
+func safeOIDCError(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.Join(strings.Fields(err.Error()), " ")
+	for _, name := range []string{"access_token", "refresh_token", "id_token", "client_secret"} {
+		message = strings.ReplaceAll(message, name, name+"=[REDACTED]")
+	}
+	if len(message) > 512 {
+		message = message[:512] + "..."
+	}
+	return message
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

@@ -55,7 +55,8 @@ func TestLoadUsesConfiguredValuesWithoutLoggingSecrets(t *testing.T) {
 		"AGENT_MANAGER_SECRET_BACKEND":              "kubernetes",
 		"AGENT_MANAGER_SECRET_NAMESPACE":            "agent-manager",
 		"AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX":    "matrix-agent",
-		"AGENT_MANAGER_AGENT_TOKEN_SCOPE":           "openid urn:matrix:client:api:*",
+		"AGENT_MANAGER_AGENT_TOKEN_SCOPE":           "openid urn:matrix:client:api:* urn:matrix:client:device:{device_id}",
+		"AGENT_MANAGER_AGENT_DEVICE_ID_TEMPLATE":    "agent-{agent_name}",
 		"AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS":  "2592000",
 	}
 

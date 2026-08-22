@@ -35,4 +35,5 @@ data:
   AGENT_MANAGER_SECRET_NAMESPACE: {{ .Values.config.secretBackend.namespace | quote }}
   AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX: {{ .Values.agent.secretNamePrefix | quote }}
   AGENT_MANAGER_AGENT_TOKEN_SCOPE: {{ .Values.agent.tokenScope | quote }}
+  AGENT_MANAGER_AGENT_DEVICE_ID_TEMPLATE: {{ .Values.agent.deviceIDTemplate | quote }}
   AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS: {{ .Values.agent.tokenExpirySeconds | int | quote }}

@@ -71,6 +71,7 @@ type ServiceConfig struct {
 	SecretNamePrefix     string
 	TokenScope           string
 	TokenExpiry          time.Duration
+	DeviceIDTemplate     string
 	MatrixUserIDTemplate string
 	ProfileProvisioner   ProfileProvisioner
 }
@@ -129,6 +130,21 @@ func (s *Service) syncProfile(ctx context.Context, localpart, accessToken, displ
 	return s.profile.SetDisplayName(ctx, accessToken, userID, displayName)
 }
 
+func (s *Service) sessionScope(localpart string) (string, error) {
+	scope := strings.TrimSpace(s.config.TokenScope)
+	if !strings.Contains(scope, "{device_id}") {
+		return scope, nil
+	}
+	if strings.Count(scope, "{device_id}") != 1 || strings.Count(s.config.DeviceIDTemplate, "{agent_name}") != 1 {
+		return "", errors.New("Matrix device scope template is invalid")
+	}
+	deviceID := strings.Replace(s.config.DeviceIDTemplate, "{agent_name}", localpart, 1)
+	if deviceID == "" || len(deviceID) > 255 || strings.ContainsAny(deviceID, " \t\r\n") {
+		return "", errors.New("Matrix device ID is invalid")
+	}
+	return strings.Replace(scope, "{device_id}", deviceID, 1), nil
+}
+
 func (s *Service) cleanupProvisionedUser(ctx context.Context, userID, sessionID string) error {
 	var cleanupErr error
 	if sessionID != "" {
@@ -154,6 +170,10 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, er
 	}
 	if len(displayName) > 256 {
 		return Result{}, errors.New("display name must be at most 256 characters")
+	}
+	scope, err := s.sessionScope(name)
+	if err != nil {
+		return Result{}, err
 	}
 	return s.withAgentLock(name, func() (Result, error) {
 		if _, err := s.secrets.GetAgent(ctx, name); err == nil {
@@ -185,7 +205,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, er
 		session, err := s.mas.CreatePersonalSession(ctx, mas.CreatePersonalSessionRequest{
 			ActorUserID: user.ID,
 			HumanName:   displayName,
-			Scope:       s.config.TokenScope,
+			Scope:       scope,
 			ExpiresIn:   durationPointer(s.config.TokenExpiry),
 		})
 		if err != nil {
@@ -243,11 +263,15 @@ func (s *Service) Rotate(ctx context.Context, name string) (Result, error) {
 			return Result{}, errors.New("agent is deactivated")
 		}
 		var session mas.PersonalSession
-		regenerated := record.Status == StatusActive && record.SessionID != ""
+		regenerated := record.Status == StatusActive && record.SessionID != "" && !strings.Contains(s.config.TokenScope, "{device_id}")
 		if regenerated {
 			session, err = s.mas.RegeneratePersonalSession(ctx, record.SessionID, durationPointer(s.config.TokenExpiry))
 		} else {
-			session, err = s.mas.CreatePersonalSession(ctx, mas.CreatePersonalSessionRequest{ActorUserID: record.MASUserID, HumanName: record.DisplayName, Scope: s.config.TokenScope, ExpiresIn: durationPointer(s.config.TokenExpiry)})
+			scope, scopeErr := s.sessionScope(name)
+			if scopeErr != nil {
+				return Result{}, scopeErr
+			}
+			session, err = s.mas.CreatePersonalSession(ctx, mas.CreatePersonalSessionRequest{ActorUserID: record.MASUserID, HumanName: record.DisplayName, Scope: scope, ExpiresIn: durationPointer(s.config.TokenExpiry)})
 		}
 		if err != nil {
 			if regenerated {
@@ -268,6 +292,12 @@ func (s *Service) Rotate(ctx context.Context, name string) (Result, error) {
 		}
 		if regenerated && session.ID != record.SessionID {
 			return Result{}, errors.New("MAS changed the personal session ID during regeneration")
+		}
+		if !regenerated && record.SessionID != "" {
+			if err := s.mas.RevokePersonalSession(ctx, record.SessionID); err != nil {
+				_ = s.mas.RevokePersonalSession(ctx, session.ID)
+				return Result{}, fmt.Errorf("revoke previous MAS personal session: %w", err)
+			}
 		}
 		updated := record
 		updated.SessionID = session.ID

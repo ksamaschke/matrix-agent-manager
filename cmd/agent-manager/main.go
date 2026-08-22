@@ -89,6 +89,7 @@ func main() {
 		SecretNamePrefix:     cfg.AgentSecretNamePrefix,
 		TokenScope:           cfg.AgentTokenScope,
 		TokenExpiry:          time.Duration(cfg.AgentTokenExpirySeconds) * time.Second,
+		DeviceIDTemplate:     cfg.AgentDeviceIDTemplate,
 		MatrixUserIDTemplate: cfg.MatrixUserIDTemplate,
 		ProfileProvisioner:   profileClient,
 	})

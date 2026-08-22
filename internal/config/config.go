@@ -45,6 +45,7 @@ type Config struct {
 	SecretNamespace         string
 	AgentSecretNamePrefix   string
 	AgentTokenScope         string
+	AgentDeviceIDTemplate   string
 	AgentTokenExpirySeconds uint32
 }
 
@@ -84,6 +85,7 @@ func Load(get Lookup) (Config, error) {
 		SecretNamespace:          get("AGENT_MANAGER_SECRET_NAMESPACE"),
 		AgentSecretNamePrefix:    get("AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX"),
 		AgentTokenScope:          get("AGENT_MANAGER_AGENT_TOKEN_SCOPE"),
+		AgentDeviceIDTemplate:    get("AGENT_MANAGER_AGENT_DEVICE_ID_TEMPLATE"),
 	}
 	if raw := get("AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS"); raw != "" {
 		seconds, err := strconv.ParseUint(raw, 10, 32)
@@ -129,6 +131,7 @@ func Load(get Lookup) (Config, error) {
 		"AGENT_MANAGER_SECRET_NAMESPACE":            cfg.SecretNamespace,
 		"AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX":    cfg.AgentSecretNamePrefix,
 		"AGENT_MANAGER_AGENT_TOKEN_SCOPE":           cfg.AgentTokenScope,
+		"AGENT_MANAGER_AGENT_DEVICE_ID_TEMPLATE":    cfg.AgentDeviceIDTemplate,
 	}
 	for name, value := range required {
 		if strings.TrimSpace(value) == "" {

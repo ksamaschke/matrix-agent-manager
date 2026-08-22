@@ -77,7 +77,8 @@ config:
 
 agent:
   secretNamePrefix: matrix-agent
-  tokenScope: "urn:matrix:client:api:*"
+  tokenScope: "openid urn:matrix:client:api:* urn:matrix:client:device:{device_id}"
+  deviceIDTemplate: "agent-{agent_name}"
   tokenExpirySeconds: 3600
 
 secretRefs:

@@ -88,10 +88,11 @@
     },
     "agent": {
       "type": "object",
-      "required": ["secretNamePrefix", "tokenScope", "tokenExpirySeconds"],
+      "required": ["secretNamePrefix", "tokenScope", "deviceIDTemplate", "tokenExpirySeconds"],
       "properties": {
         "secretNamePrefix": { "type": "string" },
         "tokenScope": { "type": "string", "minLength": 1 },
+        "deviceIDTemplate": { "type": "string", "minLength": 1 },
         "tokenExpirySeconds": { "type": "integer", "minimum": 1 }
       }
     },

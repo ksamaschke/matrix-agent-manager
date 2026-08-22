@@ -11,15 +11,16 @@ import (
 )
 
 type fakeMAS struct {
-	users              []mas.User
-	createUserRequests []mas.CreateUserRequest
-	existingUser       *mas.User
-	reactivated        []string
-	sessions           []mas.PersonalSession
-	regenerated        []string
-	revoked            []string
-	deactivated        []string
-	failCreateSecret   bool
+	users                 []mas.User
+	createUserRequests    []mas.CreateUserRequest
+	createSessionRequests []mas.CreatePersonalSessionRequest
+	existingUser          *mas.User
+	reactivated           []string
+	sessions              []mas.PersonalSession
+	regenerated           []string
+	revoked               []string
+	deactivated           []string
+	failCreateSecret      bool
 }
 
 func (f *fakeMAS) CreateUser(_ context.Context, request mas.CreateUserRequest) (mas.User, error) {
@@ -46,6 +47,7 @@ func (f *fakeMAS) ListUsers(_ context.Context, _ string) ([]mas.User, error) {
 }
 
 func (f *fakeMAS) CreatePersonalSession(_ context.Context, request mas.CreatePersonalSessionRequest) (mas.PersonalSession, error) {
+	f.createSessionRequests = append(f.createSessionRequests, request)
 	id := "session-" + request.ActorUserID + "-" + string(rune('0'+len(f.sessions)))
 	session := mas.PersonalSession{Type: "personal-session", ID: id, Attributes: mas.PersonalSessionAttributes{
 		ActorUserID: request.ActorUserID,
@@ -170,6 +172,42 @@ func newTestService() (*Service, *fakeMAS, *memorySecrets) {
 		TokenScope:       "openid urn:matrix:client:api:*",
 		TokenExpiry:      time.Hour,
 	}), masClient, secrets
+}
+
+func TestCreateAddsDeviceScopeToMatrixToken(t *testing.T) {
+	service, fake, _ := newTestService()
+	service.config.TokenScope = "openid urn:matrix:client:api:* urn:matrix:client:device:{device_id}"
+	service.config.DeviceIDTemplate = "agent-{agent_name}"
+	if _, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(fake.createSessionRequests) != 1 || fake.createSessionRequests[0].Scope != "openid urn:matrix:client:api:* urn:matrix:client:device:agent-codex" {
+		t.Fatalf("session requests = %#v", fake.createSessionRequests)
+	}
+}
+
+func TestRotateReplacesLegacySessionWhenDeviceScopeConfigured(t *testing.T) {
+	service, fake, secrets := newTestService()
+	service.config.TokenScope = "openid urn:matrix:client:api:* urn:matrix:client:device:{device_id}"
+	service.config.DeviceIDTemplate = "agent-{agent_name}"
+	created, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	rotated, err := service.Rotate(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("Rotate() error = %v", err)
+	}
+	if len(fake.createSessionRequests) != 2 || fake.createSessionRequests[1].Scope != "openid urn:matrix:client:api:* urn:matrix:client:device:agent-codex" {
+		t.Fatalf("replacement session requests = %#v", fake.createSessionRequests)
+	}
+	if len(fake.regenerated) != 0 || len(fake.revoked) != 1 || fake.revoked[0] != created.SessionID {
+		t.Fatalf("replacement lifecycle regenerated=%#v revoked=%#v", fake.regenerated, fake.revoked)
+	}
+	stored, _ := secrets.GetAgent(context.Background(), "codex")
+	if stored.SessionID != rotated.SessionID || stored.AccessToken != rotated.OneTimeToken {
+		t.Fatalf("stored replacement = %+v", stored)
+	}
 }
 
 func TestCreateSyncsMatrixProfileBeforePersisting(t *testing.T) {

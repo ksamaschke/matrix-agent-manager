@@ -245,6 +245,7 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.agents.List(r.Context())
 	if err != nil {
+		log.Printf("agent list failed: %s", safeOIDCError(err))
 		http.Error(w, "agent list failed", http.StatusInternalServerError)
 		return
 	}
@@ -258,6 +259,7 @@ func (s *Server) listUnmanaged(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.agents.ListUnmanaged(r.Context())
 	if err != nil {
+		log.Printf("unmanaged identity list failed: %s", safeOIDCError(err))
 		http.Error(w, "unmanaged identity list failed", http.StatusInternalServerError)
 		return
 	}

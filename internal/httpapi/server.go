@@ -257,6 +257,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.agents.Create(r.Context(), request)
 	if err != nil {
+		log.Printf("agent creation failed: %s", safeOIDCError(err))
 		http.Error(w, "agent creation failed", http.StatusBadRequest)
 		return
 	}

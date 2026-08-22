@@ -29,6 +29,8 @@ data:
   AGENT_MANAGER_MAS_PERSONAL_SESSIONS_URL: {{ .Values.config.mas.personalSessionsUrl | quote }}
   AGENT_MANAGER_MAS_CLIENT_ID: {{ .Values.config.mas.clientId | quote }}
   AGENT_MANAGER_MAS_CLIENT_SECRET_FILE: {{ .Values.config.mas.clientSecretFile | quote }}
+  AGENT_MANAGER_MATRIX_USER_ID_TEMPLATE: {{ .Values.config.matrix.userIDTemplate | quote }}
+  AGENT_MANAGER_MATRIX_PROFILE_URL_TEMPLATE: {{ .Values.config.matrix.profileURLTemplate | quote }}
   AGENT_MANAGER_SECRET_BACKEND: {{ .Values.config.secretBackend.type | quote }}
   AGENT_MANAGER_SECRET_NAMESPACE: {{ .Values.config.secretBackend.namespace | quote }}
   AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX: {{ .Values.agent.secretNamePrefix | quote }}

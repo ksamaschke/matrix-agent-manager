@@ -63,15 +63,22 @@ type SecretBackend interface {
 	ListAgents(context.Context) ([]SecretRecord, error)
 }
 
+type ProfileProvisioner interface {
+	SetDisplayName(context.Context, string, string, string) error
+}
+
 type ServiceConfig struct {
-	SecretNamePrefix string
-	TokenScope       string
-	TokenExpiry      time.Duration
+	SecretNamePrefix     string
+	TokenScope           string
+	TokenExpiry          time.Duration
+	MatrixUserIDTemplate string
+	ProfileProvisioner   ProfileProvisioner
 }
 
 type Service struct {
 	mas     MASClient
 	secrets SecretBackend
+	profile ProfileProvisioner
 	config  ServiceConfig
 	now     func() time.Time
 	locks   sync.Map
@@ -100,7 +107,7 @@ type UnmanagedResult struct {
 }
 
 func NewService(client MASClient, secrets SecretBackend, config ServiceConfig) *Service {
-	return &Service{mas: client, secrets: secrets, config: config, now: time.Now}
+	return &Service{mas: client, secrets: secrets, profile: config.ProfileProvisioner, config: config, now: time.Now}
 }
 
 func (s *Service) withAgentLock(name string, fn func() (Result, error)) (Result, error) {
@@ -109,6 +116,31 @@ func (s *Service) withAgentLock(name string, fn func() (Result, error)) (Result,
 	lock.Lock()
 	defer lock.Unlock()
 	return fn()
+}
+
+func (s *Service) syncProfile(ctx context.Context, localpart, accessToken, displayName string) error {
+	if s.profile == nil {
+		return nil
+	}
+	if strings.Count(s.config.MatrixUserIDTemplate, "{localpart}") != 1 {
+		return errors.New("Matrix user ID template is invalid")
+	}
+	userID := strings.Replace(s.config.MatrixUserIDTemplate, "{localpart}", localpart, 1)
+	return s.profile.SetDisplayName(ctx, accessToken, userID, displayName)
+}
+
+func (s *Service) cleanupProvisionedUser(ctx context.Context, userID, sessionID string) error {
+	var cleanupErr error
+	if sessionID != "" {
+		cleanupErr = s.mas.RevokePersonalSession(ctx, sessionID)
+	}
+	if err := s.mas.DeleteUser(ctx, userID); err != nil {
+		if cleanupErr != nil {
+			return fmt.Errorf("revoke session: %v; delete MAS user: %w", cleanupErr, err)
+		}
+		return fmt.Errorf("delete MAS user: %w", err)
+	}
+	return cleanupErr
 }
 
 func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, error) {
@@ -177,6 +209,13 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, er
 				return Result{}, fmt.Errorf("MAS returned no access token; revoke session: %w", cleanupErr)
 			}
 			return Result{}, errors.New("MAS returned no access token")
+		}
+		if err := s.syncProfile(ctx, name, session.Attributes.AccessToken, displayName); err != nil {
+			cleanupErr := s.cleanupProvisionedUser(ctx, user.ID, session.ID)
+			if cleanupErr != nil {
+				return Result{}, fmt.Errorf("sync Matrix profile: %w; cleanup provisioned user: %v", err, cleanupErr)
+			}
+			return Result{}, fmt.Errorf("sync Matrix profile: %w", err)
 		}
 		now := s.now()
 		record := SecretRecord{AgentName: name, DisplayName: displayName, MASUserID: user.ID, SessionID: session.ID, AccessToken: session.Attributes.AccessToken, Generation: 1, Status: StatusActive, CreatedAt: now, UpdatedAt: now}

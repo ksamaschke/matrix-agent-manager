@@ -11,6 +11,7 @@ import (
 	"github.com/ksamaschke/matrix-agent-manager/internal/config"
 	"github.com/ksamaschke/matrix-agent-manager/internal/httpapi"
 	"github.com/ksamaschke/matrix-agent-manager/internal/mas"
+	"github.com/ksamaschke/matrix-agent-manager/internal/matrix"
 	"github.com/ksamaschke/matrix-agent-manager/internal/oidcauth"
 	"github.com/ksamaschke/matrix-agent-manager/internal/session"
 	"k8s.io/client-go/kubernetes"
@@ -68,6 +69,10 @@ func main() {
 	if err != nil {
 		fatal("initialize MAS client", err)
 	}
+	profileClient, err := matrix.NewProfileClient(cfg.MatrixProfileURLTemplate, &http.Client{Timeout: 15 * time.Second})
+	if err != nil {
+		fatal("initialize Matrix profile client", err)
+	}
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		fatal("load in-cluster Kubernetes configuration", err)
@@ -81,9 +86,11 @@ func main() {
 		fatal("initialize Kubernetes Secret backend", err)
 	}
 	service := agents.NewService(masClient, backend, agents.ServiceConfig{
-		SecretNamePrefix: cfg.AgentSecretNamePrefix,
-		TokenScope:       cfg.AgentTokenScope,
-		TokenExpiry:      time.Duration(cfg.AgentTokenExpirySeconds) * time.Second,
+		SecretNamePrefix:     cfg.AgentSecretNamePrefix,
+		TokenScope:           cfg.AgentTokenScope,
+		TokenExpiry:          time.Duration(cfg.AgentTokenExpirySeconds) * time.Second,
+		MatrixUserIDTemplate: cfg.MatrixUserIDTemplate,
+		ProfileProvisioner:   profileClient,
 	})
 	httpServer, err := httpapi.NewServer(auth, service, httpapi.ServerConfig{
 		AdminRoles:   cfg.OIDCAdminRoles,

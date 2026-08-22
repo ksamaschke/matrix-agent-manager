@@ -68,6 +68,9 @@ config:
     personalSessionsUrl: ""
     clientId: ""
     clientSecretFile: /var/run/secrets/matrix-agent-manager/mas/client-secret
+  matrix:
+    userIDTemplate: ""
+    profileURLTemplate: ""
   secretBackend:
     type: kubernetes
     namespace: ""

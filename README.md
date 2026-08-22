@@ -20,6 +20,7 @@ lifecycle management:
 - one-time token delivery on creation and rotation;
 - token rotation, explicit revocation, deactivation, and removal;
 - MAS user/session cleanup with bounded active-session enumeration;
+- Matrix profile synchronization through explicit deployment-supplied endpoint templates;
 - Kubernetes Secret persistence with namespace-scoped RBAC;
 - fail-closed production configuration and an immutable-container Helm chart.
 
@@ -57,6 +58,8 @@ AGENT_MANAGER_MAS_USERS_URL=https://mas.example.invalid/api/admin/v1/users
 AGENT_MANAGER_MAS_PERSONAL_SESSIONS_URL=https://mas.example.invalid/api/admin/v1/personal-sessions
 AGENT_MANAGER_MAS_CLIENT_ID=agent-manager-admin
 AGENT_MANAGER_MAS_CLIENT_SECRET_FILE=/var/run/secrets/matrix-agent-manager/mas/client-secret
+AGENT_MANAGER_MATRIX_USER_ID_TEMPLATE=@{localpart}:example.invalid
+AGENT_MANAGER_MATRIX_PROFILE_URL_TEMPLATE=https://matrix.example.invalid/_matrix/client/v3/profile/{user_id}/displayname
 AGENT_MANAGER_SECRET_BACKEND=kubernetes
 AGENT_MANAGER_SECRET_NAMESPACE=agent-manager
 ```

@@ -93,6 +93,24 @@ func (f *fakeMAS) DeleteUser(_ context.Context, id string) error {
 	return nil
 }
 
+type fakeProfile struct {
+	calls []struct {
+		accessToken string
+		userID      string
+		displayName string
+	}
+	err error
+}
+
+func (f *fakeProfile) SetDisplayName(_ context.Context, accessToken, userID, displayName string) error {
+	f.calls = append(f.calls, struct {
+		accessToken string
+		userID      string
+		displayName string
+	}{accessToken, userID, displayName})
+	return f.err
+}
+
 type memorySecrets struct {
 	agents     map[string]SecretRecord
 	failUpdate bool
@@ -154,6 +172,41 @@ func newTestService() (*Service, *fakeMAS, *memorySecrets) {
 	}), masClient, secrets
 }
 
+func TestCreateSyncsMatrixProfileBeforePersisting(t *testing.T) {
+	service, fake, secrets := newTestService()
+	profile := &fakeProfile{}
+	service.profile = profile
+	service.config.MatrixUserIDTemplate = "@{localpart}:example.invalid"
+	if _, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if len(profile.calls) != 1 || profile.calls[0].accessToken != "token-session-user-codex-0" || profile.calls[0].userID != "@codex:example.invalid" || profile.calls[0].displayName != "Codex" {
+		t.Fatalf("profile calls = %#v", profile.calls)
+	}
+	if _, err := secrets.GetAgent(context.Background(), "codex"); err != nil {
+		t.Fatalf("persisted agent missing: %v", err)
+	}
+	if len(fake.revoked) != 0 {
+		t.Fatalf("revoked = %#v", fake.revoked)
+	}
+}
+
+func TestCreateRollsBackWhenMatrixProfileSyncFails(t *testing.T) {
+	service, fake, secrets := newTestService()
+	profile := &fakeProfile{err: errors.New("profile unavailable")}
+	service.profile = profile
+	service.config.MatrixUserIDTemplate = "@{localpart}:example.invalid"
+	if _, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"}); err == nil {
+		t.Fatal("Create() succeeded despite profile failure")
+	}
+	if _, err := secrets.GetAgent(context.Background(), "codex"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("agent secret error = %v", err)
+	}
+	if len(fake.revoked) != 1 || len(fake.deactivated) != 1 {
+		t.Fatalf("cleanup revoked=%#v deactivated=%#v", fake.revoked, fake.deactivated)
+	}
+}
+
 func TestCreatePersistsBeforeReturningToken(t *testing.T) {
 	service, fake, secrets := newTestService()
 	result, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"})
@@ -180,6 +233,9 @@ func TestCreatePersistsBeforeReturningToken(t *testing.T) {
 
 func TestCreateRecoversDeactivatedMASUser(t *testing.T) {
 	service, fake, secrets := newTestService()
+	profile := &fakeProfile{}
+	service.profile = profile
+	service.config.MatrixUserIDTemplate = "@{localpart}:example.invalid"
 	deactivatedAt := "2026-08-22T00:00:00Z"
 	fake.existingUser = &mas.User{
 		Type: "user",
@@ -201,6 +257,9 @@ func TestCreateRecoversDeactivatedMASUser(t *testing.T) {
 	}
 	if result.MASUserID != "user-existing" || len(fake.sessions) != 1 || fake.sessions[0].Attributes.ActorUserID != "user-existing" {
 		t.Fatalf("recovered result/session = %+v / %#v", result, fake.sessions)
+	}
+	if len(profile.calls) != 1 || profile.calls[0].userID != "@codex:example.invalid" || profile.calls[0].displayName != "Codex" {
+		t.Fatalf("recovery profile calls = %#v", profile.calls)
 	}
 	if _, err := secrets.GetAgent(context.Background(), "codex"); err != nil {
 		t.Fatalf("recovered Secret missing: %v", err)

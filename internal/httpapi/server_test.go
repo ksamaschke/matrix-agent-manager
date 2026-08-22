@@ -115,6 +115,9 @@ func TestHTTPMutationRequiresCSRFAndReturnsTokenOnlyOnCreate(t *testing.T) {
 	if len(service.created) != 1 {
 		t.Fatalf("created = %d", len(service.created))
 	}
+	if service.created[0].AgentName != "codex" || service.created[0].DisplayName != "Codex" {
+		t.Fatalf("create request = %#v", service.created[0])
+	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/agents", nil)
 	rec = httptest.NewRecorder()

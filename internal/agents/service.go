@@ -75,8 +75,8 @@ type Service struct {
 }
 
 type CreateRequest struct {
-	AgentName   string
-	DisplayName string
+	AgentName   string `json:"agent_name"`
+	DisplayName string `json:"display_name"`
 }
 
 type Result struct {

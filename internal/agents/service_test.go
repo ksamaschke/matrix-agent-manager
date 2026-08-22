@@ -13,6 +13,8 @@ import (
 type fakeMAS struct {
 	users              []mas.User
 	createUserRequests []mas.CreateUserRequest
+	existingUser       *mas.User
+	reactivated        []string
 	sessions           []mas.PersonalSession
 	regenerated        []string
 	revoked            []string
@@ -25,6 +27,18 @@ func (f *fakeMAS) CreateUser(_ context.Context, request mas.CreateUserRequest) (
 	user := mas.User{Type: "user", ID: "user-" + request.Username, Attributes: mas.UserAttributes{Username: request.Username}}
 	f.users = append(f.users, user)
 	return user, nil
+}
+
+func (f *fakeMAS) GetUserByUsername(_ context.Context, _ string) (mas.User, error) {
+	if f.existingUser == nil {
+		return mas.User{}, mas.ErrNotFound
+	}
+	return *f.existingUser, nil
+}
+
+func (f *fakeMAS) ReactivateUser(_ context.Context, id string) (mas.User, error) {
+	f.reactivated = append(f.reactivated, id)
+	return mas.User{Type: "user", ID: id}, nil
 }
 
 func (f *fakeMAS) CreatePersonalSession(_ context.Context, request mas.CreatePersonalSessionRequest) (mas.PersonalSession, error) {
@@ -157,6 +171,35 @@ func TestCreatePersistsBeforeReturningToken(t *testing.T) {
 	}
 	if len(fake.createUserRequests) != 1 || !fake.createUserRequests[0].SkipHomeserverCheck {
 		t.Fatalf("create user request = %#v", fake.createUserRequests)
+	}
+}
+
+func TestCreateRecoversDeactivatedMASUser(t *testing.T) {
+	service, fake, secrets := newTestService()
+	deactivatedAt := "2026-08-22T00:00:00Z"
+	fake.existingUser = &mas.User{
+		Type: "user",
+		ID:   "user-existing",
+		Attributes: mas.UserAttributes{
+			Username:      "codex",
+			DeactivatedAt: &deactivatedAt,
+		},
+	}
+	result, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"})
+	if err != nil {
+		t.Fatalf("Create() recovery error = %v", err)
+	}
+	if len(fake.reactivated) != 1 || fake.reactivated[0] != "user-existing" {
+		t.Fatalf("reactivated = %#v", fake.reactivated)
+	}
+	if len(fake.users) != 0 {
+		t.Fatalf("created duplicate users = %#v", fake.users)
+	}
+	if result.MASUserID != "user-existing" || len(fake.sessions) != 1 || fake.sessions[0].Attributes.ActorUserID != "user-existing" {
+		t.Fatalf("recovered result/session = %+v / %#v", result, fake.sessions)
+	}
+	if _, err := secrets.GetAgent(context.Background(), "codex"); err != nil {
+		t.Fatalf("recovered Secret missing: %v", err)
 	}
 }
 

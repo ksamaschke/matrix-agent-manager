@@ -14,8 +14,11 @@ import (
 	"time"
 )
 
+// ErrNotFound indicates that a MAS resource does not exist.
+var ErrNotFound = errors.New("MAS resource not found")
+
 const (
-	// AdminScope is the MAS scope required by the Admin API.
+	// AdminScope is the scope required by the Admin API.
 	AdminScope       = "urn:mas:admin"
 	maxResponseBytes = 1 << 20
 )
@@ -193,6 +196,36 @@ func (c *Client) CreateUser(ctx context.Context, request CreateUserRequest) (Use
 	return User{Type: response.Data.Type, ID: response.Data.ID, Attributes: response.Data.Attributes}, nil
 }
 
+// GetUserByUsername returns the MAS user for a localpart.
+func (c *Client) GetUserByUsername(ctx context.Context, username string) (User, error) {
+	if strings.TrimSpace(username) == "" || strings.ContainsAny(username, "/?#") {
+		return User{}, errors.New("MAS username is invalid")
+	}
+	collection, err := url.Parse(c.config.UsersURL)
+	if err != nil {
+		return User{}, fmt.Errorf("parse MAS users URL: %w", err)
+	}
+	collection.Path = strings.TrimRight(collection.Path, "/") + "/by-username/" + url.PathEscape(username)
+	var response singleResponse[UserAttributes]
+	if err := c.doJSON(ctx, http.MethodGet, collection.String(), nil, &response); err != nil {
+		return User{}, err
+	}
+	return User{Type: response.Data.Type, ID: response.Data.ID, Attributes: response.Data.Attributes}, nil
+}
+
+// ReactivateUser reactivates a deactivated MAS user for explicit Manager recovery.
+func (c *Client) ReactivateUser(ctx context.Context, id string) (User, error) {
+	endpoint, err := resourceEndpoint(c.config.UsersURL, id, "/reactivate")
+	if err != nil {
+		return User{}, err
+	}
+	var response singleResponse[UserAttributes]
+	if err := c.doJSON(ctx, http.MethodPost, endpoint, nil, &response); err != nil {
+		return User{}, err
+	}
+	return User{Type: response.Data.Type, ID: response.Data.ID, Attributes: response.Data.Attributes}, nil
+}
+
 // CreatePersonalSession creates a one-time personal access token.
 func (c *Client) CreatePersonalSession(ctx context.Context, request CreatePersonalSessionRequest) (PersonalSession, error) {
 	var response singleResponse[PersonalSessionAttributes]
@@ -314,6 +347,9 @@ func (c *Client) doJSON(ctx context.Context, method, endpoint string, requestBod
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("%w: MAS request returned HTTP 404", ErrNotFound)
+		}
 		return fmt.Errorf("MAS request returned HTTP %d", resp.StatusCode)
 	}
 	if responseBody == nil {

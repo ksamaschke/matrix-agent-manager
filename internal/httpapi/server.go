@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/ksamaschke/matrix-agent-manager/internal/agents"
 	"github.com/ksamaschke/matrix-agent-manager/internal/oidcauth"
@@ -110,6 +111,10 @@ func (s *Server) NewHandler() http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'")
 		mux.ServeHTTP(w, r)
 	})
+}
+
+func mutationContext(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(r.Context()), 90*time.Second)
 }
 
 func health(w http.ResponseWriter, r *http.Request) {
@@ -255,7 +260,9 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	result, err := s.agents.Create(r.Context(), request)
+	ctx, cancel := mutationContext(r)
+	defer cancel()
+	result, err := s.agents.Create(ctx, request)
 	if err != nil {
 		log.Printf("agent creation failed: %s", safeOIDCError(err))
 		http.Error(w, "agent creation failed", http.StatusBadRequest)
@@ -273,7 +280,9 @@ func (s *Server) rotateAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	result, err := s.agents.Rotate(r.Context(), r.PathValue("name"))
+	ctx, cancel := mutationContext(r)
+	defer cancel()
+	result, err := s.agents.Rotate(ctx, r.PathValue("name"))
 	if err != nil {
 		http.Error(w, "agent rotation failed", http.StatusBadRequest)
 		return
@@ -290,7 +299,9 @@ func (s *Server) deactivateAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	result, err := s.agents.Deactivate(r.Context(), r.PathValue("name"))
+	ctx, cancel := mutationContext(r)
+	defer cancel()
+	result, err := s.agents.Deactivate(ctx, r.PathValue("name"))
 	if err != nil {
 		http.Error(w, "agent deactivation failed", http.StatusBadRequest)
 		return
@@ -307,7 +318,9 @@ func (s *Server) revokeAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	result, err := s.agents.Revoke(r.Context(), r.PathValue("name"))
+	ctx, cancel := mutationContext(r)
+	defer cancel()
+	result, err := s.agents.Revoke(ctx, r.PathValue("name"))
 	if err != nil {
 		http.Error(w, "agent revoke failed", http.StatusBadRequest)
 		return
@@ -324,7 +337,9 @@ func (s *Server) removeAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	result, err := s.agents.Remove(r.Context(), r.PathValue("name"))
+	ctx, cancel := mutationContext(r)
+	defer cancel()
+	result, err := s.agents.Remove(ctx, r.PathValue("name"))
 	if err != nil {
 		http.Error(w, "agent removal failed", http.StatusBadRequest)
 		return

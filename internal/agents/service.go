@@ -28,6 +28,8 @@ const (
 // MASClient is the narrow lifecycle subset used by the manager.
 type MASClient interface {
 	CreateUser(context.Context, mas.CreateUserRequest) (mas.User, error)
+	GetUserByUsername(context.Context, string) (mas.User, error)
+	ReactivateUser(context.Context, string) (mas.User, error)
 	CreatePersonalSession(context.Context, mas.CreatePersonalSessionRequest) (mas.PersonalSession, error)
 	RegeneratePersonalSession(context.Context, string, *uint32) (mas.PersonalSession, error)
 	ListPersonalSessions(context.Context, string) ([]mas.PersonalSession, error)
@@ -119,9 +121,26 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, er
 		} else if !errors.Is(err, ErrNotFound) {
 			return Result{}, fmt.Errorf("check existing agent: %w", err)
 		}
-		user, err := s.mas.CreateUser(ctx, mas.CreateUserRequest{Username: name, SkipHomeserverCheck: true, DisplayName: &displayName})
-		if err != nil {
-			return Result{}, fmt.Errorf("create MAS user: %w", err)
+		user, lookupErr := s.mas.GetUserByUsername(ctx, name)
+		switch {
+		case lookupErr == nil:
+			if user.Attributes.DeactivatedAt == nil {
+				return Result{}, errors.New("MAS user already exists and is active")
+			}
+			if user.Attributes.LockedAt != nil {
+				return Result{}, errors.New("MAS user exists but is locked")
+			}
+			user, err = s.mas.ReactivateUser(ctx, user.ID)
+			if err != nil {
+				return Result{}, fmt.Errorf("reactivate orphaned MAS user: %w", err)
+			}
+		case errors.Is(lookupErr, mas.ErrNotFound):
+			user, err = s.mas.CreateUser(ctx, mas.CreateUserRequest{Username: name, SkipHomeserverCheck: true, DisplayName: &displayName})
+			if err != nil {
+				return Result{}, fmt.Errorf("create MAS user: %w", err)
+			}
+		default:
+			return Result{}, fmt.Errorf("lookup MAS user: %w", lookupErr)
 		}
 		session, err := s.mas.CreatePersonalSession(ctx, mas.CreatePersonalSessionRequest{
 			ActorUserID: user.ID,

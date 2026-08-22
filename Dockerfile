@@ -9,6 +9,6 @@ RUN GOMAXPROCS=1 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldfla
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/agent-manager /agent-manager
-USER nonroot:nonroot
+USER 65532:65532
 EXPOSE 8080
 ENTRYPOINT ["/agent-manager"]

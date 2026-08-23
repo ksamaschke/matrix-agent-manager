@@ -26,8 +26,6 @@ service:
   type: ClusterIP
   port: 8080
 
-nodeSelector: {}
-
 httpRoute:
   enabled: false
   hostnames: []

@@ -115,10 +115,13 @@ func (f *fakeProfile) SetDisplayName(_ context.Context, accessToken, userID, dis
 
 type memorySecrets struct {
 	agents     map[string]SecretRecord
+	e2ee       map[string]E2EERecord
 	failUpdate bool
 }
 
-func newMemorySecrets() *memorySecrets { return &memorySecrets{agents: make(map[string]SecretRecord)} }
+func newMemorySecrets() *memorySecrets {
+	return &memorySecrets{agents: make(map[string]SecretRecord), e2ee: make(map[string]E2EERecord)}
+}
 func (m *memorySecrets) GetAgent(_ context.Context, name string) (SecretRecord, error) {
 	record, ok := m.agents[name]
 	if !ok {
@@ -163,6 +166,41 @@ func (m *memorySecrets) ListAgents(_ context.Context) ([]SecretRecord, error) {
 	}
 	return out, nil
 }
+func (m *memorySecrets) GetE2EE(_ context.Context, name string) (E2EERecord, error) {
+	record, ok := m.e2ee[name]
+	if !ok {
+		return E2EERecord{}, ErrNotFound
+	}
+	return record, nil
+}
+func (m *memorySecrets) EnsureE2EE(_ context.Context, record E2EERecord) error {
+	if existing, ok := m.e2ee[record.AgentName]; ok {
+		if existing.DeviceID != record.DeviceID {
+			return errors.New("device changed")
+		}
+		return nil
+	}
+	m.e2ee[record.AgentName] = record
+	return nil
+}
+func (m *memorySecrets) UpdateE2EE(_ context.Context, record E2EERecord) error {
+	existing, ok := m.e2ee[record.AgentName]
+	if !ok {
+		return ErrNotFound
+	}
+	if existing.RecoveryKey != "" && existing.RecoveryKey != record.RecoveryKey {
+		return errors.New("recovery key already exists")
+	}
+	m.e2ee[record.AgentName] = record
+	return nil
+}
+func (m *memorySecrets) DeleteE2EE(_ context.Context, name string) error {
+	if _, ok := m.e2ee[name]; !ok {
+		return ErrNotFound
+	}
+	delete(m.e2ee, name)
+	return nil
+}
 
 func newTestService() (*Service, *fakeMAS, *memorySecrets) {
 	masClient := &fakeMAS{}
@@ -171,6 +209,8 @@ func newTestService() (*Service, *fakeMAS, *memorySecrets) {
 		SecretNamePrefix: "synthetic-agent",
 		TokenScope:       "openid urn:matrix:client:api:*",
 		TokenExpiry:      time.Hour,
+		DeviceIDTemplate: "agent-{agent_name}",
+		E2EEBackend:      secrets,
 	}), masClient, secrets
 }
 

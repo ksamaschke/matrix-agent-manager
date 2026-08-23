@@ -47,6 +47,9 @@ func (f *fakeAgentService) Create(_ context.Context, request agents.CreateReques
 func (f *fakeAgentService) Rotate(context.Context, string) (agents.Result, error) {
 	return agents.Result{AgentName: "codex", OneTimeToken: "synthetic-rotated-token", Generation: 2, Status: agents.StatusActive}, nil
 }
+func (f *fakeAgentService) InitializeE2EE(context.Context, string) (agents.Result, error) {
+	return agents.Result{AgentName: "codex", E2EEStatus: agents.E2EEStatusPending, E2EEDeviceID: "agent-codex", Status: agents.StatusActive}, nil
+}
 func (f *fakeAgentService) Deactivate(context.Context, string) (agents.Result, error) {
 	return agents.Result{AgentName: "codex", Status: agents.StatusDeactivated}, nil
 }
@@ -128,6 +131,25 @@ func TestHTTPMutationRequiresCSRFAndReturnsTokenOnlyOnCreate(t *testing.T) {
 	server.NewHandler().ServeHTTP(rec, req)
 	if strings.Contains(rec.Body.String(), "synthetic-token") {
 		t.Fatal("ordinary list leaked token")
+	}
+}
+
+func TestHTTPE2EEInitializationRequiresCSRFAndReturnsStatusOnly(t *testing.T) {
+	server, _ := newTestHTTPServer(t, oidcauth.Identity{Subject: "admin", Roles: []string{"admin"}})
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/codex/e2ee/initialize", strings.NewReader(`{}`))
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "csrf"})
+	req.Header.Set("X-CSRF-Token", "csrf")
+	rec := httptest.NewRecorder()
+	server.NewHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("E2EE initialization status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"e2ee_status":"pending"`) || !strings.Contains(body, `"e2ee_device_id":"agent-codex"`) {
+		t.Fatalf("E2EE status missing: %s", body)
+	}
+	if strings.Contains(body, "recovery") || strings.Contains(body, "synthetic-token") {
+		t.Fatalf("E2EE initialization leaked sensitive material: %s", body)
 	}
 }
 

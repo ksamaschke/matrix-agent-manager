@@ -38,6 +38,7 @@ type AgentService interface {
 	ListUnmanaged(context.Context) ([]agents.UnmanagedResult, error)
 	Create(context.Context, agents.CreateRequest) (agents.Result, error)
 	Rotate(context.Context, string) (agents.Result, error)
+	InitializeE2EE(context.Context, string) (agents.Result, error)
 	Deactivate(context.Context, string) (agents.Result, error)
 	Revoke(context.Context, string) (agents.Result, error)
 	Remove(context.Context, string) (agents.Result, error)
@@ -102,6 +103,7 @@ func (s *Server) NewHandler() http.Handler {
 	mux.HandleFunc("GET /api/unmanaged", s.listUnmanaged)
 	mux.HandleFunc("POST /api/agents", s.createAgent)
 	mux.HandleFunc("POST /api/agents/{name}/rotate", s.rotateAgent)
+	mux.HandleFunc("POST /api/agents/{name}/e2ee/initialize", s.initializeE2EE)
 	mux.HandleFunc("POST /api/agents/{name}/deactivate", s.deactivateAgent)
 	mux.HandleFunc("POST /api/agents/{name}/revoke", s.revokeAgent)
 	mux.HandleFunc("DELETE /api/agents/{name}", s.removeAgent)
@@ -230,7 +232,7 @@ const section=document.querySelector('#agents');
 const unmanaged=document.querySelector('#unmanaged');
 function showMessage(text,token){message.replaceChildren();const p=document.createElement('p');p.textContent=text;message.append(p);if(token){const pre=document.createElement('pre');pre.className='token';pre.textContent=token;message.append(pre);}}
 async function api(path,options={}){options.headers={...(options.headers||{}),'X-CSRF-Token':csrf,'Content-Type':'application/json'};const response=await fetch(path,options);const text=await response.text();let data={};try{data=JSON.parse(text)}catch{}if(!response.ok)throw new Error(data.error||text||('HTTP '+response.status));return data;}
-async function load(){try{const list=await api('/api/agents',{headers:{}});section.replaceChildren();if(!list.length){const p=document.createElement('p');p.textContent='No Manager-managed agents registered.';section.append(p);return;}for(const agent of list){const card=document.createElement('article');card.className='agent';const title=document.createElement('strong');title.textContent=agent.display_name+' ('+agent.agent_name+')';card.append(title);const meta=document.createElement('p');meta.textContent='Status: '+agent.status+' · Generation: '+agent.generation;card.append(meta);if(agent.status==='active'){const rotate=document.createElement('button');rotate.textContent='Rotate token';rotate.onclick=async()=>{try{const result=await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/rotate',{method:'POST',body:'{}'});showMessage('New token for '+result.agent_name+'. Store it now; it will not be shown again.',result.one_time_token);await load()}catch(e){showMessage(e.message)}};card.append(rotate);const revoke=document.createElement('button');revoke.textContent='Revoke token';revoke.onclick=async()=>{if(!confirm('Revoke '+agent.agent_name+' token?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/revoke',{method:'POST',body:'{}'});showMessage('Agent token revoked.');await load()}catch(e){showMessage(e.message)}};card.append(revoke);const deactivate=document.createElement('button');deactivate.textContent='Deactivate';deactivate.onclick=async()=>{if(!confirm('Deactivate '+agent.agent_name+'?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/deactivate',{method:'POST',body:'{}'});showMessage('Agent deactivated.');await load()}catch(e){showMessage(e.message)}};card.append(deactivate);const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}else{const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}section.append(card)}}catch(e){showMessage(e.message)}}
+async function load(){try{const list=await api('/api/agents',{headers:{}});section.replaceChildren();if(!list.length){const p=document.createElement('p');p.textContent='No Manager-managed agents registered.';section.append(p);return;}for(const agent of list){const card=document.createElement('article');card.className='agent';const title=document.createElement('strong');title.textContent=agent.display_name+' ('+agent.agent_name+')';card.append(title);const meta=document.createElement('p');meta.textContent='Status: '+agent.status+' · Generation: '+agent.generation+' · E2EE: '+(agent.e2ee_status||'uninitialized')+(agent.e2ee_device_id?' ('+agent.e2ee_device_id+')':'');card.append(meta);if(agent.status==='active'){const e2ee=document.createElement('button');e2ee.textContent='Initialize E2EE';e2ee.disabled=agent.e2ee_status==='pending'||agent.e2ee_status==='ready';e2ee.onclick=async()=>{try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/e2ee/initialize',{method:'POST',body:'{}'});showMessage('E2EE state initialized for '+agent.agent_name+'.');await load()}catch(e){showMessage(e.message)}};card.append(e2ee);const rotate=document.createElement('button');rotate.textContent='Rotate token';rotate.onclick=async()=>{try{const result=await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/rotate',{method:'POST',body:'{}'});showMessage('New token for '+result.agent_name+'. Store it now; it will not be shown again.',result.one_time_token);await load()}catch(e){showMessage(e.message)}};card.append(rotate);const revoke=document.createElement('button');revoke.textContent='Revoke token';revoke.onclick=async()=>{if(!confirm('Revoke '+agent.agent_name+' token?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/revoke',{method:'POST',body:'{}'});showMessage('Agent token revoked.');await load()}catch(e){showMessage(e.message)}};card.append(revoke);const deactivate=document.createElement('button');deactivate.textContent='Deactivate';deactivate.onclick=async()=>{if(!confirm('Deactivate '+agent.agent_name+'?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name)+'/deactivate',{method:'POST',body:'{}'});showMessage('Agent deactivated.');await load()}catch(e){showMessage(e.message)}};card.append(deactivate);const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}else{const remove=document.createElement('button');remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove '+agent.agent_name+' permanently?'))return;try{await api('/api/agents/'+encodeURIComponent(agent.agent_name),{method:'DELETE'});showMessage('Agent removed.');await load()}catch(e){showMessage(e.message)}};card.append(remove)}section.append(card)}}catch(e){showMessage(e.message)}}
 async function loadUnmanaged(){try{const list=await api('/api/unmanaged',{headers:{}});unmanaged.replaceChildren();if(!list.length){const p=document.createElement('p');p.textContent='No unmanaged deactivated MAS identities.';unmanaged.append(p);return;}const note=document.createElement('p');note.className='muted';note.textContent='These MAS identities have no Manager Secret. They are already deactivated; MAS retains their localparts as tombstones.';unmanaged.append(note);for(const item of list){const card=document.createElement('article');card.className='agent';const title=document.createElement('strong');title.textContent=item.agent_name;card.append(title);const meta=document.createElement('p');meta.textContent='Status: deactivated · Not managed by this Manager';card.append(meta);unmanaged.append(card)}}catch(e){const p=document.createElement('p');p.textContent='Unmanaged identity list unavailable';unmanaged.replaceChildren(p)}}
 document.querySelector('#create').onsubmit=async(event)=>{event.preventDefault();const form=new FormData(event.target);try{const result=await api('/api/agents',{method:'POST',body:JSON.stringify({agent_name:form.get('agent_name'),display_name:form.get('display_name')})});showMessage('Agent created. Store this token now; it will not be shown again.',result.one_time_token);event.target.reset();await load()}catch(e){showMessage(e.message)}};
 load();
@@ -305,6 +307,25 @@ func (s *Server) rotateAgent(w http.ResponseWriter, r *http.Request) {
 	result, err := s.agents.Rotate(ctx, r.PathValue("name"))
 	if err != nil {
 		http.Error(w, "agent rotation failed", http.StatusBadRequest)
+		return
+	}
+	s.writeMutationJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) initializeE2EE(w http.ResponseWriter, r *http.Request) {
+	if err := s.checkCSRF(r); err != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if _, err := s.requireAdmin(r); err != nil {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	ctx, cancel := mutationContext(r)
+	defer cancel()
+	result, err := s.agents.InitializeE2EE(ctx, r.PathValue("name"))
+	if err != nil {
+		http.Error(w, "agent E2EE initialization failed", http.StatusBadRequest)
 		return
 	}
 	s.writeMutationJSON(w, http.StatusOK, result)

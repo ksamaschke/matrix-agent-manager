@@ -47,7 +47,7 @@ func NewKubernetesBackend(client kubernetes.Interface, namespace, prefix string)
 	if errs := validation.IsDNS1123Subdomain(prefix); len(errs) > 0 {
 		return nil, fmt.Errorf("Kubernetes Secret name prefix is invalid: %s", errs[0])
 	}
-	if len(prefix)+1+63 > 253 {
+	if len(prefix)+1+63+len("-e2ee") > 253 {
 		return nil, errors.New("Kubernetes Secret name prefix is too long")
 	}
 	return &KubernetesBackend{client: client, namespace: namespace, prefix: prefix, now: time.Now}, nil

@@ -28,6 +28,10 @@ The product remains deployment-neutral. Hostnames, Keycloak details, MAS
 endpoints, namespaces, and Secret references belong in deployment overlays.
 The optional operator/CRD is not part of this API-based MVP.
 
+## Guides
+
+- [Hermes Agent on macOS with Matrix E2EE](docs/macos-hermes-matrix-e2ee.md) — recommended Docker/Linux-adapter deployment, credential hardening, and crypto-store handling.
+
 ## Local development
 
 The production binary intentionally refuses to start with development defaults.

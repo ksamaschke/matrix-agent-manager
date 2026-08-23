@@ -25,6 +25,7 @@ spec:
         app.kubernetes.io/part-of: matrix-agent-manager
     spec:
       serviceAccountName: {{ include "matrix-agent-manager.serviceAccountName" . }}
+      nodeSelector: {{ toJson .Values.nodeSelector }}
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true

@@ -1,8 +1,8 @@
 # Hermes Agent on macOS with Matrix E2EE
 
-This is a practical deployment note for running the [Hermes Agent](https://github.com/NousResearch/hermes-agent) Matrix gateway from macOS, including encrypted Matrix rooms.
+Practical notes for running the [Hermes Agent](https://github.com/NousResearch/hermes-agent) Matrix gateway from macOS, including encrypted Matrix rooms.
 
-It is intentionally a **guide, not a fork or patched source distribution**. The native macOS build issue described below belongs upstream; keeping a local patch would create an ongoing maintenance obligation.
+This documents the **native fix that was actually implemented and verified on Apple Silicon**, plus the documented proxy-mode alternative. It is a guide, not a fork or a maintained patched-source distribution.
 
 ## What you need
 
@@ -14,25 +14,98 @@ It is intentionally a **guide, not a fork or patched source distribution**. The 
 
 Hermes supports homeservers such as Synapse, Dendrite, Conduit, and matrix.org. Keep the Matrix bot account separate from your personal account so credentials, device state, and recovery can be rotated independently.
 
-## Important Apple Silicon caveat
+## The Apple Silicon problem
 
-Hermes uses `mautrix` with the `python-olm` bindings for Matrix encryption. At the time of writing, `python-olm` does not provide a usable macOS ARM64 wheel. Installing the Hermes Matrix extra can therefore try to compile libolm locally. On current Apple clang versions, that build may fail in libolm's bundled source with a const-correctness error in `include/olm/list.hh`.
+Hermes uses `mautrix` with the `python-olm` bindings for Matrix encryption. Two things are true on macOS ARM64:
 
-This means that `brew install libolm` alone is **not sufficient**: `python-olm` still builds its own bundled libolm when installed from PyPI.
+1. **`python-olm` ships no macOS ARM64 wheel.** Every version is source-only on this platform, so installing it triggers a local compile.
+2. **The bundled libolm source fails to compile on current Apple clang.** The build dies in `libolm/include/olm/list.hh` with a const-correctness error:
 
-### Recommended macOS deployment: Linux container for the Matrix adapter
+   ```
+   include/olm/list.hh:106:13: error: cannot assign to variable 'other_pos'
+   include/olm/list.hh:102:19: note: variable 'other_pos' declared const
+   ```
 
-Use Hermes' proxy mode:
+   Line 102 declares `other_pos` as `T * const` (a const pointer) but line 106 increments it. Modern clang rejects this.
+
+`brew install libolm` alone is **not sufficient**: `python-olm` builds its own bundled libolm from source when installed from PyPI, so the system libolm is never used.
+
+## Native fix (what we actually did)
+
+The failing line is a one-character bug. Removing the `const` from the pointer declaration makes the bundled libolm compile, and a native macOS ARM64 wheel can then be built and installed. This keeps E2EE running natively on the Mac — no Docker, no proxy.
+
+### 1. Get the `python-olm` source
+
+```bash
+cd /tmp
+curl -sL "https://pypi.org/simple/python-olm/" \
+  -H "Accept: application/vnd.pypi.simple.v1+json" -o olm_index.json
+# Grab the 3.2.16 sdist URL from olm_index.json, then:
+curl -sL "<sdist-url>" -o olm.tar.gz
+tar xzf olm.tar.gz -C /tmp
+```
+
+### 2. Patch the bundled libolm
+
+Edit `/tmp/python-olm-3.2.16/libolm/include/olm/list.hh`:
+
+```diff
+         T * this_pos = _data;
+-        T * const other_pos = other._data;
++        T * other_pos = other._data;
+         while (other_pos != other._end) {
+```
+
+### 3. Build a native wheel
+
+```bash
+cd /tmp/python-olm-3.2.16
+~/.hermes/hermes-agent/venv/bin/pip wheel . --no-deps -w /tmp/olm_wheels
+```
+
+This produces `python_olm-3.2.16-cp311-cp311-macosx_11_0_arm64.whl`.
+
+### 4. Install the wheel, then the Hermes Matrix extra
+
+```bash
+cd ~/.hermes/hermes-agent
+uv pip install --python venv/bin/python /tmp/olm_wheels/python_olm-3.2.16-*.whl
+uv pip install --python venv/bin/python --find-links /tmp/olm_wheels -e ".[matrix]"
+```
+
+The `--find-links` points the resolver at the local wheel so it does not try to rebuild `python-olm` from source.
+
+### 5. Verify
+
+```bash
+venv/bin/python -c "import olm; from olm import Account; a=Account(); print(list(a.identity_keys.keys()))"
+# expect: ['curve25519', 'ed25519']
+
+venv/bin/python -c "import sys; sys.path.insert(0,'.'); from tools.lazy_deps import is_available; print(is_available('platform.matrix'))"
+# expect: True
+```
+
+### Maintenance caveat
+
+This is a **local workaround**, not a supported distribution. The patch lives outside the normal PyPI package, so:
+
+- every Hermes upgrade that reinstalls `python-olm` needs the wheel rebuilt;
+- the build may change with Python, clang, libolm, or Hermes versions;
+- do not publish the private wheel or treat it as a maintained artifact.
+
+If you want a repeatable, no-patch deployment, use the proxy-mode path below instead.
+
+## Alternative: proxy mode (Linux container for the Matrix adapter)
+
+If you prefer not to patch anything, run only the Matrix adapter (with E2EE) in a Linux container and let it forward to the native macOS agent:
 
 - **macOS host:** runs the main Hermes agent, tools, skills, sessions, memory, and local-file access.
 - **Linux container:** runs only the Matrix adapter and E2EE crypto.
 - The container forwards decrypted messages to the host API server and encrypts responses before sending them to Matrix.
 
-This avoids distributing or maintaining a patched `python-olm` source tree.
+### Host setup (macOS)
 
-## Host setup (macOS)
-
-Configure the host Hermes instance in `~/.hermes/.env`:
+In `~/.hermes/.env`:
 
 ```dotenv
 API_SERVER_ENABLED=true
@@ -47,15 +120,13 @@ Start the host gateway:
 hermes gateway
 ```
 
-From the container, the macOS host is normally reachable as `host.docker.internal` with Docker Desktop. If using another VM/runtime, use the host address reachable from that VM instead.
+From the container, the macOS host is normally reachable as `host.docker.internal` with Docker Desktop. Do not expose port 8642 to the public Internet; restrict it to the local Docker/VM network and protect it with a strong `API_SERVER_KEY`.
 
-Do not expose port 8642 to the public Internet. Restrict it to the local Docker/VM network and protect it with a strong `API_SERVER_KEY`.
+### Matrix adapter container
 
-## Matrix adapter container
+The container needs the Matrix credentials and proxy settings, but **not** an LLM API key (inference stays on the macOS host).
 
-The container needs the Matrix credentials and proxy settings, but it does **not** need an LLM API key because inference remains on the macOS host.
-
-Example `docker-compose.yml`:
+`docker-compose.yml`:
 
 ```yaml
 services:
@@ -73,7 +144,7 @@ services:
       - ./matrix-store:/root/.hermes/platforms/matrix/store
 ```
 
-Example `Dockerfile`:
+`Dockerfile`:
 
 ```dockerfile
 FROM python:3.11-slim
@@ -91,9 +162,7 @@ RUN apt-get update \
 CMD ["hermes", "gateway"]
 ```
 
-The exact image installation should follow the Hermes release you are using; do not blindly copy a development checkout into production. Pin the Hermes version and rebuild the image when upgrading.
-
-Start the adapter after the host is running:
+Pin the Hermes version and rebuild the image when upgrading. Start the adapter after the host is running:
 
 ```bash
 docker compose up -d
@@ -132,26 +201,16 @@ Persist the container's corresponding `matrix-store` volume. Deleting `crypto.db
 
 If using cross-signing, configure the bot's Matrix recovery/security key according to the Hermes Matrix documentation. Keep the recovery key outside Git and ordinary logs.
 
-## Native installation: why this guide does not provide a patch
-
-A native install may be possible by patching the bundled libolm source and building a local `python-olm` wheel. That is not a stable distribution strategy:
-
-- the patch is outside the normal PyPI package;
-- the build may change with Python, clang, libolm, or Hermes versions;
-- every Hermes upgrade would need retesting;
-- distributing a private wheel creates a support and security-maintenance burden.
-
-For repeatable deployments, prefer the Linux-container proxy path until upstream provides a supported macOS ARM64 build or changes the Matrix crypto dependency.
-
 ## Troubleshooting checklist
 
-1. Check that the host gateway is running and port 8642 is reachable from the container.
-2. Verify that `GATEWAY_PROXY_KEY` exactly matches `API_SERVER_KEY`.
-3. Check the container logs for Matrix sync and crypto initialization errors.
-4. Confirm the bot is invited to the room and that the room is in `MATRIX_ALLOWED_ROOMS`.
-5. Confirm the sender is in `MATRIX_ALLOWED_USERS`.
-6. Preserve the Matrix crypto store across restarts.
-7. If E2EE is required, do not silently change to `optional` or `off` to hide a crypto failure.
+1. Confirm `python-olm` imports and creates an Olm account (native path) before configuring the gateway.
+2. Check that the host gateway is running and port 8642 is reachable from the container (proxy path).
+3. Verify that `GATEWAY_PROXY_KEY` exactly matches `API_SERVER_KEY` (proxy path).
+4. Check the gateway/container logs for Matrix sync and crypto initialization errors.
+5. Confirm the bot is invited to the room and that the room is in `MATRIX_ALLOWED_ROOMS`.
+6. Confirm the sender is in `MATRIX_ALLOWED_USERS`.
+7. Preserve the Matrix crypto store across restarts.
+8. If E2EE is required, do not silently change to `optional` or `off` to hide a crypto failure.
 
 ## References
 

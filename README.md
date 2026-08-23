@@ -30,7 +30,7 @@ The optional operator/CRD is not part of this API-based MVP.
 
 ## Guides
 
-- [Hermes Agent on macOS with Matrix E2EE](docs/macos-hermes-matrix-e2ee.md) — recommended Docker/Linux-adapter deployment, credential hardening, and crypto-store handling.
+- [Hermes Agent on macOS with Matrix E2EE](docs/macos-hermes-matrix-e2ee.md) — native Apple Silicon fix (libolm patch + local wheel build) and the Docker proxy-mode alternative, with credential hardening and crypto-store handling.
 
 ## Local development
 

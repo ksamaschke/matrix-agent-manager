@@ -92,7 +92,6 @@ func main() {
 		DeviceIDTemplate:     cfg.AgentDeviceIDTemplate,
 		MatrixUserIDTemplate: cfg.MatrixUserIDTemplate,
 		ProfileProvisioner:   profileClient,
-		E2EEBackend:          backend,
 	})
 	httpServer, err := httpapi.NewServer(auth, service, httpapi.ServerConfig{
 		AdminRoles:   cfg.OIDCAdminRoles,

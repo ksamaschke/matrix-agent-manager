@@ -74,7 +74,6 @@ type ServiceConfig struct {
 	DeviceIDTemplate     string
 	MatrixUserIDTemplate string
 	ProfileProvisioner   ProfileProvisioner
-	E2EEBackend          E2EEBackend
 }
 
 type Service struct {
@@ -92,15 +91,13 @@ type CreateRequest struct {
 }
 
 type Result struct {
-	AgentName    string     `json:"agent_name"`
-	DisplayName  string     `json:"display_name"`
-	MASUserID    string     `json:"mas_user_id"`
-	SessionID    string     `json:"-"`
-	OneTimeToken string     `json:"one_time_token,omitempty"`
-	Generation   int        `json:"generation"`
-	Status       Status     `json:"status"`
-	E2EEStatus   E2EEStatus `json:"e2ee_status,omitempty"`
-	E2EEDeviceID string     `json:"e2ee_device_id,omitempty"`
+	AgentName    string `json:"agent_name"`
+	DisplayName  string `json:"display_name"`
+	MASUserID    string `json:"mas_user_id"`
+	SessionID    string `json:"-"`
+	OneTimeToken string `json:"one_time_token,omitempty"`
+	Generation   int    `json:"generation"`
+	Status       Status `json:"status"`
 }
 
 type UnmanagedResult struct {
@@ -146,114 +143,6 @@ func (s *Service) sessionScope(localpart string) (string, error) {
 		return "", errors.New("Matrix device ID is invalid")
 	}
 	return strings.Replace(scope, "{device_id}", deviceID, 1), nil
-}
-
-func (s *Service) e2eeDeviceID(localpart string) (string, error) {
-	if strings.Count(s.config.DeviceIDTemplate, "{agent_name}") != 1 {
-		return "", errors.New("Matrix device ID template is invalid")
-	}
-	deviceID := strings.Replace(s.config.DeviceIDTemplate, "{agent_name}", localpart, 1)
-	if deviceID == "" || len(deviceID) > 255 || strings.ContainsAny(deviceID, " \t\r\n") {
-		return "", errors.New("Matrix device ID is invalid")
-	}
-	return deviceID, nil
-}
-
-func (s *Service) ensureE2EE(ctx context.Context, localpart string) (E2EERecord, error) {
-	if s.config.E2EEBackend == nil {
-		return E2EERecord{AgentName: localpart, Status: E2EEStatusUninitialized}, nil
-	}
-	deviceID, err := s.e2eeDeviceID(localpart)
-	if err != nil {
-		return E2EERecord{}, err
-	}
-	record, err := s.config.E2EEBackend.GetE2EE(ctx, localpart)
-	if err == nil {
-		if record.DeviceID != deviceID {
-			return E2EERecord{}, fmt.Errorf("agent E2EE device ID changed from %q to %q", record.DeviceID, deviceID)
-		}
-		return record, nil
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return E2EERecord{}, err
-	}
-	now := s.now()
-	record = E2EERecord{AgentName: localpart, DeviceID: deviceID, Status: E2EEStatusPending, CreatedAt: now, UpdatedAt: now}
-	if err := s.config.E2EEBackend.EnsureE2EE(ctx, record); err != nil {
-		return E2EERecord{}, err
-	}
-	return record, nil
-}
-
-func (s *Service) deleteE2EE(ctx context.Context, localpart string) error {
-	if s.config.E2EEBackend == nil {
-		return nil
-	}
-	if err := s.config.E2EEBackend.DeleteE2EE(ctx, localpart); err != nil && !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	return nil
-}
-
-func (s *Service) resultWithE2EE(ctx context.Context, record SecretRecord, includeToken bool) (Result, error) {
-	result := resultFromRecord(record, includeToken)
-	if s.config.E2EEBackend == nil {
-		return result, nil
-	}
-	e2ee, err := s.ensureE2EE(ctx, record.AgentName)
-	if err != nil {
-		return Result{}, err
-	}
-	result.E2EEStatus = e2ee.Status
-	result.E2EEDeviceID = e2ee.DeviceID
-	return result, nil
-}
-
-func (s *Service) resultWithStoredE2EE(ctx context.Context, record SecretRecord, includeToken bool) (Result, error) {
-	result := resultFromRecord(record, includeToken)
-	if s.config.E2EEBackend == nil {
-		return result, nil
-	}
-	e2ee, err := s.config.E2EEBackend.GetE2EE(ctx, record.AgentName)
-	if errors.Is(err, ErrNotFound) {
-		result.E2EEStatus = E2EEStatusUninitialized
-		if deviceID, deviceErr := s.e2eeDeviceID(record.AgentName); deviceErr == nil {
-			result.E2EEDeviceID = deviceID
-		}
-		return result, nil
-	}
-	if err != nil {
-		return Result{}, err
-	}
-	result.E2EEStatus = e2ee.Status
-	result.E2EEDeviceID = e2ee.DeviceID
-	return result, nil
-}
-
-// InitializeE2EE creates the pending per-agent E2EE Secret used by the central
-// transport. It never accepts or returns recovery-key material.
-func (s *Service) InitializeE2EE(ctx context.Context, name string) (Result, error) {
-	canonicalName, err := validateAgentName(name)
-	if err != nil {
-		return Result{}, err
-	}
-	return s.withAgentLock(canonicalName, func() (Result, error) {
-		record, err := s.secrets.GetAgent(ctx, canonicalName)
-		if err != nil {
-			return Result{}, err
-		}
-		if record.Status != StatusActive {
-			return Result{}, errors.New("agent is not active")
-		}
-		if _, err := s.ensureE2EE(ctx, canonicalName); err != nil {
-			return Result{}, fmt.Errorf("initialize agent E2EE state: %w", err)
-		}
-		return s.resultWithE2EE(ctx, record, false)
-	})
-}
-
-func (s *Service) cleanupE2EEAfterCreate(ctx context.Context, name string) {
-	_ = s.deleteE2EE(ctx, name)
 }
 
 func (s *Service) cleanupProvisionedUser(ctx context.Context, userID, sessionID string) error {
@@ -355,14 +244,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, er
 			_ = s.mas.DeleteUser(ctx, user.ID)
 			return Result{}, fmt.Errorf("persist agent secret: %w", err)
 		}
-		if _, err := s.ensureE2EE(ctx, name); err != nil {
-			_ = s.secrets.DeleteAgent(ctx, name)
-			s.cleanupE2EEAfterCreate(ctx, name)
-			_ = s.mas.RevokePersonalSession(ctx, session.ID)
-			_ = s.mas.DeleteUser(ctx, user.ID)
-			return Result{}, fmt.Errorf("initialize agent E2EE state: %w", err)
-		}
-		return s.resultWithE2EE(ctx, record, true)
+		return resultFromRecord(record, true), nil
 	})
 }
 
@@ -436,7 +318,7 @@ func (s *Service) Rotate(ctx context.Context, name string) (Result, error) {
 			}
 			return Result{}, fmt.Errorf("persist replacement agent secret: %w", err)
 		}
-		return s.resultWithE2EE(ctx, updated, true)
+		return resultFromRecord(updated, true), nil
 	})
 }
 
@@ -471,7 +353,7 @@ func (s *Service) Revoke(ctx context.Context, name string) (Result, error) {
 			}
 			return Result{}, fmt.Errorf("persist revoked agent: %w", err)
 		}
-		return s.resultWithE2EE(ctx, record, false)
+		return resultFromRecord(record, false), nil
 	})
 }
 
@@ -487,7 +369,7 @@ func (s *Service) Deactivate(ctx context.Context, name string) (Result, error) {
 			return Result{}, err
 		}
 		if record.Status == StatusDeactivated {
-			return s.resultWithStoredE2EE(ctx, record, false)
+			return resultFromRecord(record, false), nil
 		}
 		if err := s.revokeActiveSessions(ctx, record); err != nil {
 			return Result{}, err
@@ -507,10 +389,7 @@ func (s *Service) Deactivate(ctx context.Context, name string) (Result, error) {
 			}
 			return Result{}, fmt.Errorf("persist deactivated agent: %w", err)
 		}
-		if err := s.deleteE2EE(ctx, name); err != nil {
-			return Result{}, fmt.Errorf("delete agent E2EE Secret: %w", err)
-		}
-		return s.resultWithStoredE2EE(ctx, record, false)
+		return resultFromRecord(record, false), nil
 	})
 }
 
@@ -528,25 +407,16 @@ func (s *Service) Remove(ctx context.Context, name string) (Result, error) {
 			return Result{}, err
 		}
 		if record.Status == StatusDeactivated {
-			if err := s.deleteE2EE(ctx, name); err != nil {
-				return Result{}, fmt.Errorf("delete agent E2EE Secret: %w", err)
-			}
 			if err := s.secrets.DeleteAgent(ctx, name); err != nil {
 				return Result{}, fmt.Errorf("delete agent Secret: %w", err)
 			}
-			return s.resultWithStoredE2EE(ctx, record, false)
+			return resultFromRecord(record, false), nil
 		}
 		if err := s.revokeActiveSessions(ctx, record); err != nil {
 			return Result{}, err
 		}
 		if _, err := s.mas.DeactivateUser(ctx, record.MASUserID, false); err != nil {
 			return Result{}, fmt.Errorf("deactivate MAS user: %w", err)
-		}
-		if err := s.deleteE2EE(ctx, name); err != nil {
-			if clearErr := s.clearTokenMaterial(ctx, name, StatusDeactivated); clearErr != nil {
-				return Result{}, fmt.Errorf("delete agent E2EE Secret: %w; clear token material: %v", err, clearErr)
-			}
-			return Result{}, fmt.Errorf("delete agent E2EE Secret: %w", err)
 		}
 		if err := s.secrets.DeleteAgent(ctx, name); err != nil {
 			if clearErr := s.clearTokenMaterial(ctx, name, StatusDeactivated); clearErr != nil {
@@ -557,7 +427,7 @@ func (s *Service) Remove(ctx context.Context, name string) (Result, error) {
 		record.SessionID = ""
 		record.AccessToken = ""
 		record.Status = StatusDeactivated
-		return s.resultWithStoredE2EE(ctx, record, false)
+		return resultFromRecord(record, false), nil
 	})
 }
 
@@ -615,11 +485,7 @@ func (s *Service) List(ctx context.Context) ([]Result, error) {
 	sort.Slice(records, func(i, j int) bool { return records[i].AgentName < records[j].AgentName })
 	results := make([]Result, 0, len(records))
 	for _, record := range records {
-		result, err := s.resultWithE2EE(ctx, record, false)
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, result)
+		results = append(results, resultFromRecord(record, false))
 	}
 	return results, nil
 }

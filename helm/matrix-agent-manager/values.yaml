@@ -70,7 +70,11 @@ config:
     clientSecretFile: /var/run/secrets/matrix-agent-manager/mas/client-secret
   matrix:
     userIDTemplate: ""
+    serverName: ""
     profileURLTemplate: ""
+    avatarURLTemplate: ""
+    mediaUploadURL: ""
+    mediaThumbnailURLTemplate: ""
   secretBackend:
     type: kubernetes
     namespace: ""

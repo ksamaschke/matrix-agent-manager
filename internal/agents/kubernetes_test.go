@@ -14,7 +14,7 @@ func TestKubernetesBackendRoundTripAndListScope(t *testing.T) {
 	client := fake.NewSimpleClientset(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "unrelated", Namespace: "agent-manager", Labels: map[string]string{"other": "true"}},
 	})
-	backend, err := NewKubernetesBackend(client, "agent-manager", "matrix-agent")
+	backend, err := NewKubernetesBackendWithServerName(client, "agent-manager", "matrix-agent", "example.invalid")
 	if err != nil {
 		t.Fatalf("NewKubernetesBackend() error = %v", err)
 	}
@@ -22,6 +22,7 @@ func TestKubernetesBackendRoundTripAndListScope(t *testing.T) {
 	record := SecretRecord{
 		AgentName:   "codex",
 		DisplayName: "Codex",
+		AvatarURL:   "mxc://example.invalid/avatar-id",
 		MASUserID:   "user-codex",
 		SessionID:   "session-codex",
 		AccessToken: "synthetic-token",
@@ -37,7 +38,7 @@ func TestKubernetesBackendRoundTripAndListScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAgent() error = %v", err)
 	}
-	if got.AccessToken != record.AccessToken || got.Generation != 1 {
+	if got.AccessToken != record.AccessToken || got.Generation != 1 || got.AvatarURL != record.AvatarURL {
 		t.Fatalf("got = %+v", got)
 	}
 	list, err := backend.ListAgents(context.Background())

@@ -1,8 +1,12 @@
 package agents
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"testing"
 	"time"
@@ -101,7 +105,19 @@ type fakeProfile struct {
 		userID      string
 		displayName string
 	}
-	err error
+	avatarUploads []struct {
+		accessToken string
+		filename    string
+		contentType string
+		data        []byte
+	}
+	avatarURLs []struct {
+		accessToken string
+		userID      string
+		avatarURL   string
+	}
+	err       error
+	avatarURL string
 }
 
 func (f *fakeProfile) SetDisplayName(_ context.Context, accessToken, userID, displayName string) error {
@@ -111,6 +127,38 @@ func (f *fakeProfile) SetDisplayName(_ context.Context, accessToken, userID, dis
 		displayName string
 	}{accessToken, userID, displayName})
 	return f.err
+}
+
+func (f *fakeProfile) UploadAvatar(_ context.Context, accessToken, filename, contentType string, data []byte) (string, error) {
+	f.avatarUploads = append(f.avatarUploads, struct {
+		accessToken string
+		filename    string
+		contentType string
+		data        []byte
+	}{accessToken, filename, contentType, data})
+	if f.err != nil {
+		return "", f.err
+	}
+	if f.avatarURL == "" {
+		f.avatarURL = "mxc://example.invalid/avatar-id"
+	}
+	return f.avatarURL, nil
+}
+
+func (f *fakeProfile) SetAvatarURL(_ context.Context, accessToken, userID, avatarURL string) error {
+	f.avatarURLs = append(f.avatarURLs, struct {
+		accessToken string
+		userID      string
+		avatarURL   string
+	}{accessToken, userID, avatarURL})
+	return f.err
+}
+
+func (f *fakeProfile) FetchAvatar(_ context.Context, _, _ string) ([]byte, string, error) {
+	if f.err != nil {
+		return nil, "", f.err
+	}
+	return []byte("avatar"), "image/png", nil
 }
 
 type memorySecrets struct {
@@ -227,6 +275,106 @@ func TestCreateSyncsMatrixProfileBeforePersisting(t *testing.T) {
 	if len(fake.revoked) != 0 {
 		t.Fatalf("revoked = %#v", fake.revoked)
 	}
+}
+
+func TestSetAvatarUploadsAndPersistsMatrixContentURI(t *testing.T) {
+	service, _, secrets := newTestService()
+	profile := &fakeProfile{}
+	service.avatar = profile
+	service.config.MatrixUserIDTemplate = "@{localpart}:example.invalid"
+	service.config.MatrixServerName = "example.invalid"
+	created, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	result, err := service.SetAvatar(context.Background(), "codex", AvatarUpload{
+		Filename:    "agent.png",
+		ContentType: "image/png",
+		Data:        tinyPNG(t),
+	})
+	if err != nil {
+		t.Fatalf("SetAvatar() error = %v", err)
+	}
+	if result.AvatarURL != "mxc://example.invalid/avatar-id" {
+		t.Fatalf("avatar URL = %q", result.AvatarURL)
+	}
+	if len(profile.avatarUploads) != 1 || profile.avatarUploads[0].accessToken != created.OneTimeToken || profile.avatarUploads[0].filename != "agent.png" || profile.avatarUploads[0].contentType != "image/png" {
+		t.Fatalf("avatar uploads = %#v", profile.avatarUploads)
+	}
+	if len(profile.avatarURLs) != 1 || profile.avatarURLs[0].userID != "@codex:example.invalid" || profile.avatarURLs[0].avatarURL != result.AvatarURL {
+		t.Fatalf("avatar URL calls = %#v", profile.avatarURLs)
+	}
+	stored, err := secrets.GetAgent(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+	if stored.AvatarURL != result.AvatarURL {
+		t.Fatalf("stored avatar URL = %q", stored.AvatarURL)
+	}
+}
+
+func TestGetAvatarUsesServerSideProvisioner(t *testing.T) {
+	service, _, _ := newTestService()
+	profile := &fakeProfile{}
+	service.avatar = profile
+	service.config.MatrixUserIDTemplate = "@{localpart}:example.invalid"
+	service.config.MatrixServerName = "example.invalid"
+	if _, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if _, err := service.SetAvatar(context.Background(), "codex", AvatarUpload{Filename: "agent.png", ContentType: "image/png", Data: tinyPNG(t)}); err != nil {
+		t.Fatalf("SetAvatar() error = %v", err)
+	}
+	data, contentType, err := service.GetAvatar(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetAvatar() error = %v", err)
+	}
+	if string(data) != "avatar" || contentType != "image/png" {
+		t.Fatalf("avatar = %q content type = %q", data, contentType)
+	}
+}
+
+func TestSetAvatarRollsBackRemoteAvatarWhenPersistenceFails(t *testing.T) {
+	service, _, secrets := newTestService()
+	profile := &fakeProfile{}
+	service.avatar = profile
+	service.config.MatrixUserIDTemplate = "@{localpart}:example.invalid"
+	if _, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	secrets.failUpdate = true
+	if _, err := service.SetAvatar(context.Background(), "codex", AvatarUpload{Filename: "agent.png", ContentType: "image/png", Data: tinyPNG(t)}); err == nil {
+		t.Fatal("SetAvatar() succeeded despite persistence failure")
+	}
+	if len(profile.avatarURLs) != 2 || profile.avatarURLs[1].avatarURL != "" {
+		t.Fatalf("avatar rollback calls = %#v", profile.avatarURLs)
+	}
+}
+
+func TestSetAvatarRejectsInactiveAgent(t *testing.T) {
+	service, _, _ := newTestService()
+	service.avatar = &fakeProfile{}
+	service.config.MatrixUserIDTemplate = "@{localpart}:example.invalid"
+	if _, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if _, err := service.Deactivate(context.Background(), "codex"); err != nil {
+		t.Fatalf("Deactivate() error = %v", err)
+	}
+	if _, err := service.SetAvatar(context.Background(), "codex", AvatarUpload{ContentType: "image/png", Data: tinyPNG(t)}); err == nil {
+		t.Fatal("SetAvatar() succeeded for inactive agent")
+	}
+}
+
+func tinyPNG(t *testing.T) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	imageData := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	imageData.Set(0, 0, color.RGBA{R: 32, G: 64, B: 128, A: 255})
+	if err := png.Encode(&buffer, imageData); err != nil {
+		t.Fatalf("encode test PNG: %v", err)
+	}
+	return buffer.Bytes()
 }
 
 func TestCreateRollsBackWhenMatrixProfileSyncFails(t *testing.T) {

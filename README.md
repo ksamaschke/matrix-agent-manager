@@ -20,7 +20,7 @@ lifecycle management:
 - one-time token delivery on creation and rotation;
 - token rotation, explicit revocation, deactivation, and removal;
 - MAS user/session cleanup with bounded active-session enumeration;
-- Matrix profile synchronization through explicit deployment-supplied endpoint templates;
+- Matrix display-name and avatar synchronization through explicit deployment-supplied endpoint templates;
 - Kubernetes Secret persistence with namespace-scoped RBAC;
 - fail-closed production configuration and an immutable-container Helm chart.
 
@@ -61,10 +61,21 @@ AGENT_MANAGER_MAS_CLIENT_SECRET_FILE=/var/run/secrets/matrix-agent-manager/mas/c
 AGENT_MANAGER_AGENT_TOKEN_SCOPE=openid urn:matrix:client:api:* urn:matrix:client:device:{device_id}
 AGENT_MANAGER_AGENT_DEVICE_ID_TEMPLATE=agent-{agent_name}
 AGENT_MANAGER_MATRIX_USER_ID_TEMPLATE=@{localpart}:example.invalid
+AGENT_MANAGER_MATRIX_SERVER_NAME=example.invalid
 AGENT_MANAGER_MATRIX_PROFILE_URL_TEMPLATE=https://matrix.example.invalid/_matrix/client/v3/profile/{user_id}/displayname
+AGENT_MANAGER_MATRIX_AVATAR_URL_TEMPLATE=https://matrix.example.invalid/_matrix/client/v3/profile/{user_id}/avatar_url
+AGENT_MANAGER_MATRIX_MEDIA_UPLOAD_URL=https://matrix.example.invalid/_matrix/media/v3/upload
+AGENT_MANAGER_MATRIX_MEDIA_THUMBNAIL_URL_TEMPLATE=https://matrix.example.invalid/_matrix/client/v1/media/thumbnail/{server_name}/{media_id}
 AGENT_MANAGER_SECRET_BACKEND=kubernetes
 AGENT_MANAGER_SECRET_NAMESPACE=agent-manager
 ```
+
+The dashboard accepts PNG and JPEG avatar uploads up to 5 MiB. Images are uploaded
+through the agent's Matrix client token; only the resulting `mxc://` URI is stored
+in the agent metadata. `AGENT_MANAGER_MATRIX_SERVER_NAME` must match the server
+name component returned in the `mxc://` URI. The thumbnail URL template must point
+at the homeserver's Matrix media thumbnail endpoint and contain `{server_name}`
+and `{media_id}`.
 
 Do not place secret values in environment variables, source code, Helm values,
 CRD status, logs, or Git. Use mounted files or a supported secret backend.

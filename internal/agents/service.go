@@ -1,9 +1,14 @@
 package agents
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"net/url"
 	"sort"
 	"strings"
 	"sync"
@@ -13,8 +18,9 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("agent not found")
-	ErrConflict = errors.New("agent changed concurrently")
+	ErrNotFound       = errors.New("agent not found")
+	ErrAvatarNotFound = errors.New("agent avatar not found")
+	ErrConflict       = errors.New("agent changed concurrently")
 )
 
 type Status string
@@ -23,6 +29,12 @@ const (
 	StatusActive      Status = "active"
 	StatusRevoked     Status = "revoked"
 	StatusDeactivated Status = "deactivated"
+)
+
+const (
+	MaxAvatarBytes     = 5 << 20
+	maxAvatarDimension = 4096
+	maxAvatarPixels    = 16 * 1024 * 1024
 )
 
 // MASClient is the narrow lifecycle subset used by the manager.
@@ -44,6 +56,7 @@ type MASClient interface {
 type SecretRecord struct {
 	AgentName       string
 	DisplayName     string
+	AvatarURL       string
 	MASUserID       string
 	SessionID       string
 	AccessToken     string
@@ -67,19 +80,28 @@ type ProfileProvisioner interface {
 	SetDisplayName(context.Context, string, string, string) error
 }
 
+type AvatarProvisioner interface {
+	UploadAvatar(context.Context, string, string, string, []byte) (string, error)
+	SetAvatarURL(context.Context, string, string, string) error
+	FetchAvatar(context.Context, string, string) ([]byte, string, error)
+}
+
 type ServiceConfig struct {
 	SecretNamePrefix     string
 	TokenScope           string
 	TokenExpiry          time.Duration
 	DeviceIDTemplate     string
 	MatrixUserIDTemplate string
+	MatrixServerName     string
 	ProfileProvisioner   ProfileProvisioner
+	AvatarProvisioner    AvatarProvisioner
 }
 
 type Service struct {
 	mas     MASClient
 	secrets SecretBackend
 	profile ProfileProvisioner
+	avatar  AvatarProvisioner
 	config  ServiceConfig
 	now     func() time.Time
 	locks   sync.Map
@@ -93,6 +115,7 @@ type CreateRequest struct {
 type Result struct {
 	AgentName    string `json:"agent_name"`
 	DisplayName  string `json:"display_name"`
+	AvatarURL    string `json:"avatar_url,omitempty"`
 	MASUserID    string `json:"mas_user_id"`
 	SessionID    string `json:"-"`
 	OneTimeToken string `json:"one_time_token,omitempty"`
@@ -108,7 +131,7 @@ type UnmanagedResult struct {
 }
 
 func NewService(client MASClient, secrets SecretBackend, config ServiceConfig) *Service {
-	return &Service{mas: client, secrets: secrets, profile: config.ProfileProvisioner, config: config, now: time.Now}
+	return &Service{mas: client, secrets: secrets, profile: config.ProfileProvisioner, avatar: config.AvatarProvisioner, config: config, now: time.Now}
 }
 
 func (s *Service) withAgentLock(name string, fn func() (Result, error)) (Result, error) {
@@ -123,11 +146,18 @@ func (s *Service) syncProfile(ctx context.Context, localpart, accessToken, displ
 	if s.profile == nil {
 		return nil
 	}
-	if strings.Count(s.config.MatrixUserIDTemplate, "{localpart}") != 1 {
-		return errors.New("Matrix user ID template is invalid")
+	userID, err := s.matrixUserID(localpart)
+	if err != nil {
+		return err
 	}
-	userID := strings.Replace(s.config.MatrixUserIDTemplate, "{localpart}", localpart, 1)
 	return s.profile.SetDisplayName(ctx, accessToken, userID, displayName)
+}
+
+func (s *Service) matrixUserID(localpart string) (string, error) {
+	if strings.Count(s.config.MatrixUserIDTemplate, "{localpart}") != 1 || strings.ContainsAny(s.config.MatrixUserIDTemplate, "\r\n") {
+		return "", errors.New("Matrix user ID template is invalid")
+	}
+	return strings.Replace(s.config.MatrixUserIDTemplate, "{localpart}", localpart, 1), nil
 }
 
 func (s *Service) sessionScope(localpart string) (string, error) {
@@ -246,6 +276,83 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (Result, er
 		}
 		return resultFromRecord(record, true), nil
 	})
+}
+
+// SetAvatar uploads and assigns a profile image for an active managed agent.
+// The image bytes are transient; only the resulting mxc:// URI is persisted.
+func (s *Service) SetAvatar(ctx context.Context, name string, upload AvatarUpload) (Result, error) {
+	canonicalName, err := validateAgentName(name)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := validateAvatarUpload(upload); err != nil {
+		return Result{}, err
+	}
+	if s.avatar == nil {
+		return Result{}, errors.New("Matrix avatar provisioning is not configured")
+	}
+	name = canonicalName
+	return s.withAgentLock(name, func() (Result, error) {
+		record, err := s.secrets.GetAgent(ctx, name)
+		if err != nil {
+			return Result{}, err
+		}
+		if record.Status != StatusActive || record.AccessToken == "" {
+			return Result{}, errors.New("agent must be active to update its avatar")
+		}
+		userID, err := s.matrixUserID(name)
+		if err != nil {
+			return Result{}, err
+		}
+		avatarURL, err := s.avatar.UploadAvatar(ctx, record.AccessToken, upload.Filename, upload.ContentType, upload.Data)
+		if err != nil {
+			return Result{}, fmt.Errorf("upload Matrix avatar: %w", err)
+		}
+		if err := validateAvatarURLForServer(avatarURL, s.config.MatrixServerName); err != nil {
+			return Result{}, fmt.Errorf("Matrix avatar upload returned invalid URI: %w", err)
+		}
+		if err := s.avatar.SetAvatarURL(ctx, record.AccessToken, userID, avatarURL); err != nil {
+			return Result{}, fmt.Errorf("set Matrix avatar: %w", err)
+		}
+		updated := record
+		updated.AvatarURL = avatarURL
+		updated.UpdatedAt = s.now()
+		if err := s.secrets.UpdateAgent(ctx, updated); err != nil {
+			_ = s.avatar.SetAvatarURL(ctx, record.AccessToken, userID, record.AvatarURL)
+			return Result{}, fmt.Errorf("persist Matrix avatar: %w", err)
+		}
+		return resultFromRecord(updated, false), nil
+	})
+}
+
+// GetAvatar returns a bounded thumbnail for an active managed agent. The
+// underlying Matrix access token is used only inside the service boundary.
+func (s *Service) GetAvatar(ctx context.Context, name string) ([]byte, string, error) {
+	canonicalName, err := validateAgentName(name)
+	if err != nil {
+		return nil, "", err
+	}
+	if s.avatar == nil {
+		return nil, "", errors.New("Matrix avatar provisioning is not configured")
+	}
+	record, err := s.secrets.GetAgent(ctx, canonicalName)
+	if errors.Is(err, ErrNotFound) {
+		return nil, "", ErrAvatarNotFound
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	if record.Status != StatusActive || record.AccessToken == "" || record.AvatarURL == "" {
+		return nil, "", ErrAvatarNotFound
+	}
+	if err := validateAvatarURLForServer(record.AvatarURL, s.config.MatrixServerName); err != nil {
+		return nil, "", err
+	}
+	data, contentType, err := s.avatar.FetchAvatar(ctx, record.AccessToken, record.AvatarURL)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch Matrix avatar: %w", err)
+	}
+	return data, contentType, nil
 }
 
 func (s *Service) Rotate(ctx context.Context, name string) (Result, error) {
@@ -519,11 +626,79 @@ func (s *Service) ListUnmanaged(ctx context.Context) ([]UnmanagedResult, error) 
 }
 
 func resultFromRecord(record SecretRecord, includeToken bool) Result {
-	result := Result{AgentName: record.AgentName, DisplayName: record.DisplayName, MASUserID: record.MASUserID, SessionID: record.SessionID, Generation: record.Generation, Status: record.Status}
+	result := Result{AgentName: record.AgentName, DisplayName: record.DisplayName, AvatarURL: record.AvatarURL, MASUserID: record.MASUserID, SessionID: record.SessionID, Generation: record.Generation, Status: record.Status}
 	if includeToken {
 		result.OneTimeToken = record.AccessToken
 	}
 	return result
+}
+
+type AvatarUpload struct {
+	Filename    string
+	ContentType string
+	Data        []byte
+}
+
+func validateAvatarUpload(upload AvatarUpload) error {
+	if len(upload.Data) == 0 {
+		return errors.New("avatar image is required")
+	}
+	if len(upload.Data) > MaxAvatarBytes {
+		return fmt.Errorf("avatar image must be at most %d bytes", MaxAvatarBytes)
+	}
+	contentType := strings.ToLower(strings.TrimSpace(upload.ContentType))
+	if contentType != "image/png" && contentType != "image/jpeg" {
+		return errors.New("avatar image must be PNG or JPEG")
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(upload.Data))
+	if err != nil {
+		return fmt.Errorf("decode avatar image: %w", err)
+	}
+	if (format != "png" && format != "jpeg") || config.Width < 1 || config.Height < 1 || config.Width > maxAvatarDimension || config.Height > maxAvatarDimension || config.Width > maxAvatarPixels/config.Height {
+		return errors.New("avatar image dimensions are invalid")
+	}
+	return nil
+}
+
+func validateAvatarURL(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme != "mxc" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("avatar URL must be an mxc:// URI")
+	}
+	mediaID := strings.TrimPrefix(parsed.Path, "/")
+	if mediaID == "" || strings.Contains(mediaID, "/") {
+		return errors.New("avatar URL must contain one media ID")
+	}
+	return nil
+}
+
+func validateAvatarURLForServer(raw, serverName string) error {
+	if err := validateAvatarURL(raw); err != nil {
+		return err
+	}
+	serverName = strings.TrimSpace(serverName)
+	if serverName == "" || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	if err := validateMatrixServerName(serverName); err != nil {
+		return err
+	}
+	parsed, _ := url.Parse(strings.TrimSpace(raw))
+	if !strings.EqualFold(parsed.Host, serverName) {
+		return fmt.Errorf("server name %q is not the configured Matrix server", parsed.Host)
+	}
+	return nil
+}
+
+func validateMatrixServerName(raw string) error {
+	serverName := strings.TrimSpace(raw)
+	if serverName == "" || strings.ContainsAny(serverName, "/?#@ \t\r\n") {
+		return errors.New("Matrix server name is invalid")
+	}
+	return nil
 }
 
 func validateAgentName(name string) (string, error) {

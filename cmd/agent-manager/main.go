@@ -69,7 +69,13 @@ func main() {
 	if err != nil {
 		fatal("initialize MAS client", err)
 	}
-	profileClient, err := matrix.NewProfileClient(cfg.MatrixProfileURLTemplate, &http.Client{Timeout: 15 * time.Second})
+	profileClient, err := matrix.NewProfileClientWithConfig(matrix.ProfileClientConfig{
+		DisplayNameURLTemplate:    cfg.MatrixProfileURLTemplate,
+		AvatarURLTemplate:         cfg.MatrixAvatarURLTemplate,
+		MediaUploadURL:            cfg.MatrixMediaUploadURL,
+		MediaThumbnailURLTemplate: cfg.MatrixMediaThumbnailURLTemplate,
+		MatrixServerName:          cfg.MatrixServerName,
+	}, &http.Client{Timeout: 15 * time.Second})
 	if err != nil {
 		fatal("initialize Matrix profile client", err)
 	}
@@ -81,7 +87,7 @@ func main() {
 	if err != nil {
 		fatal("initialize Kubernetes client", err)
 	}
-	backend, err := agents.NewKubernetesBackend(kubeClient, cfg.SecretNamespace, cfg.AgentSecretNamePrefix)
+	backend, err := agents.NewKubernetesBackendWithServerName(kubeClient, cfg.SecretNamespace, cfg.AgentSecretNamePrefix, cfg.MatrixServerName)
 	if err != nil {
 		fatal("initialize Kubernetes Secret backend", err)
 	}
@@ -91,7 +97,9 @@ func main() {
 		TokenExpiry:          time.Duration(cfg.AgentTokenExpirySeconds) * time.Second,
 		DeviceIDTemplate:     cfg.AgentDeviceIDTemplate,
 		MatrixUserIDTemplate: cfg.MatrixUserIDTemplate,
+		MatrixServerName:     cfg.MatrixServerName,
 		ProfileProvisioner:   profileClient,
+		AvatarProvisioner:    profileClient,
 	})
 	httpServer, err := httpapi.NewServer(auth, service, httpapi.ServerConfig{
 		AdminRoles:   cfg.OIDCAdminRoles,

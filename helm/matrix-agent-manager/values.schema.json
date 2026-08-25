@@ -70,10 +70,14 @@
         },
         "matrix": {
           "type": "object",
-          "required": ["userIDTemplate", "profileURLTemplate"],
+          "required": ["userIDTemplate", "serverName", "profileURLTemplate", "avatarURLTemplate", "mediaUploadURL", "mediaThumbnailURLTemplate"],
           "properties": {
             "userIDTemplate": { "type": "string" },
-            "profileURLTemplate": { "type": "string" }
+            "serverName": { "type": "string" },
+            "profileURLTemplate": { "type": "string" },
+            "avatarURLTemplate": { "type": "string" },
+            "mediaUploadURL": { "type": "string" },
+            "mediaThumbnailURLTemplate": { "type": "string" }
           }
         },
         "secretBackend": {

@@ -1,8 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,6 +33,7 @@ func (f *fakeAuth) IdentityFromRequest(*http.Request) (oidcauth.Identity, error)
 
 type fakeAgentService struct {
 	created []agents.CreateRequest
+	avatars []agents.AvatarUpload
 }
 
 func (f *fakeAgentService) List(context.Context) ([]agents.Result, error) {
@@ -43,6 +46,13 @@ func (f *fakeAgentService) ListUnmanaged(context.Context) ([]agents.UnmanagedRes
 func (f *fakeAgentService) Create(_ context.Context, request agents.CreateRequest) (agents.Result, error) {
 	f.created = append(f.created, request)
 	return agents.Result{AgentName: request.AgentName, DisplayName: request.DisplayName, OneTimeToken: "synthetic-token", Generation: 1, Status: agents.StatusActive}, nil
+}
+func (f *fakeAgentService) SetAvatar(_ context.Context, _ string, upload agents.AvatarUpload) (agents.Result, error) {
+	f.avatars = append(f.avatars, upload)
+	return agents.Result{AgentName: "codex", AvatarURL: "mxc://example.invalid/avatar-id", Status: agents.StatusActive}, nil
+}
+func (f *fakeAgentService) GetAvatar(context.Context, string) ([]byte, string, error) {
+	return []byte("avatar"), "image/png", nil
 }
 func (f *fakeAgentService) Rotate(context.Context, string) (agents.Result, error) {
 	return agents.Result{AgentName: "codex", OneTimeToken: "synthetic-rotated-token", Generation: 2, Status: agents.StatusActive}, nil
@@ -85,6 +95,55 @@ func TestHTTPAuthAndRoleBoundaries(t *testing.T) {
 	server.NewHandler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer POST status = %d, want 403", rec.Code)
+	}
+}
+
+func TestHTTPAvatarUploadRequiresCSRFAndForwardsImage(t *testing.T) {
+	server, service := newTestHTTPServer(t, oidcauth.Identity{Subject: "admin", Roles: []string{"admin"}})
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("avatar", "agent.png")
+	if err != nil {
+		t.Fatalf("CreateFormFile() error = %v", err)
+	}
+	if _, err := part.Write([]byte("not-an-image")); err != nil {
+		t.Fatalf("write multipart image: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/agents/codex/avatar", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.AddCookie(&http.Cookie{Name: csrfCookieName, Value: "csrf"})
+	req.Header.Set("X-CSRF-Token", "csrf")
+	rec := httptest.NewRecorder()
+	server.NewHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("avatar status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(service.avatars) != 1 || service.avatars[0].Filename != "agent.png" || string(service.avatars[0].Data) != "not-an-image" || service.avatars[0].ContentType != "text/plain; charset=utf-8" {
+		t.Fatalf("avatar upload = %#v", service.avatars)
+	}
+}
+
+func TestHTTPAvatarProxyRequiresViewerAndServesImage(t *testing.T) {
+	server, _ := newTestHTTPServer(t, oidcauth.Identity{Subject: "viewer", Roles: []string{"viewer"}})
+	req := httptest.NewRequest(http.MethodGet, "/api/agents/codex/avatar", nil)
+	rec := httptest.NewRecorder()
+	server.NewHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "avatar" {
+		t.Fatalf("avatar proxy response = %d %q", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Content-Type") != "image/png" || rec.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("avatar proxy headers = %#v", rec.Header())
+	}
+
+	server, _ = newTestHTTPServer(t, oidcauth.Identity{})
+	req = httptest.NewRequest(http.MethodGet, "/api/agents/codex/avatar", nil)
+	rec = httptest.NewRecorder()
+	server.NewHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("unauthenticated avatar proxy status = %d", rec.Code)
 	}
 }
 
@@ -184,6 +243,12 @@ func TestHTTPIndexUsesNonceBoundCSP(t *testing.T) {
 	csp := rec.Header().Get("Content-Security-Policy")
 	if !strings.Contains(csp, "script-src 'nonce-") || strings.Contains(csp, "script-src 'unsafe-inline'") {
 		t.Fatalf("CSP = %q", csp)
+	}
+	if !strings.Contains(csp, "img-src 'self'") {
+		t.Fatalf("CSP missing same-origin avatar policy = %q", csp)
+	}
+	if !strings.Contains(rec.Body.String(), "60% 45%") || !strings.Contains(rec.Body.String(), "/api/agents/") {
+		t.Fatalf("avatar rendering proxy missing from index: %s", rec.Body.String())
 	}
 	var csrfCookie *http.Cookie
 	for _, cookie := range rec.Result().Cookies() {

@@ -27,18 +27,32 @@ const (
 // KubernetesBackend persists agent metadata and token material in namespaced
 // Secrets. The caller's RBAC must limit access to this namespace.
 type KubernetesBackend struct {
-	client    kubernetes.Interface
-	namespace string
-	prefix    string
-	now       func() time.Time
+	client     kubernetes.Interface
+	namespace  string
+	prefix     string
+	serverName string
+	now        func() time.Time
 }
 
 func NewKubernetesBackend(client kubernetes.Interface, namespace, prefix string) (*KubernetesBackend, error) {
+	return newKubernetesBackend(client, namespace, prefix, "")
+}
+
+func NewKubernetesBackendWithServerName(client kubernetes.Interface, namespace, prefix, serverName string) (*KubernetesBackend, error) {
+	return newKubernetesBackend(client, namespace, prefix, serverName)
+}
+
+func newKubernetesBackend(client kubernetes.Interface, namespace, prefix, serverName string) (*KubernetesBackend, error) {
 	if client == nil {
 		return nil, errors.New("Kubernetes client is required")
 	}
 	if strings.TrimSpace(namespace) == "" {
 		return nil, errors.New("Kubernetes Secret namespace is required")
+	}
+	if strings.TrimSpace(serverName) != "" {
+		if err := validateMatrixServerName(serverName); err != nil {
+			return nil, fmt.Errorf("Matrix server name is invalid: %w", err)
+		}
 	}
 	prefix = strings.Trim(strings.TrimSpace(prefix), "-")
 	if prefix == "" {
@@ -50,7 +64,7 @@ func NewKubernetesBackend(client kubernetes.Interface, namespace, prefix string)
 	if len(prefix)+1+63 > 253 {
 		return nil, errors.New("Kubernetes Secret name prefix is too long")
 	}
-	return &KubernetesBackend{client: client, namespace: namespace, prefix: prefix, now: time.Now}, nil
+	return &KubernetesBackend{client: client, namespace: namespace, prefix: prefix, serverName: strings.TrimSpace(serverName), now: time.Now}, nil
 }
 
 func (b *KubernetesBackend) GetAgent(ctx context.Context, name string) (SecretRecord, error) {
@@ -64,7 +78,7 @@ func (b *KubernetesBackend) GetAgent(ctx context.Context, name string) (SecretRe
 	if err != nil {
 		return SecretRecord{}, fmt.Errorf("get agent Secret: %w", err)
 	}
-	return recordFromSecret(secret)
+	return b.recordFromSecret(secret)
 }
 
 func (b *KubernetesBackend) CreateAgent(ctx context.Context, record SecretRecord) error {
@@ -139,7 +153,7 @@ func (b *KubernetesBackend) ListAgents(ctx context.Context) ([]SecretRecord, err
 		if !strings.HasPrefix(list.Items[i].Name, b.prefix+"-") || list.Items[i].Type != corev1.SecretType(secretType) {
 			continue
 		}
-		record, err := recordFromSecret(&list.Items[i])
+		record, err := b.recordFromSecret(&list.Items[i])
 		if err != nil {
 			return nil, err
 		}
@@ -161,6 +175,9 @@ func (b *KubernetesBackend) secretFromRecord(record SecretRecord) (*corev1.Secre
 	}
 	if record.MASUserID == "" {
 		return nil, errors.New("agent Secret requires a MAS user ID")
+	}
+	if err := validateAvatarURLForServer(record.AvatarURL, b.serverName); err != nil {
+		return nil, fmt.Errorf("agent Secret avatar URL is invalid: %w", err)
 	}
 	if record.Generation < 1 {
 		return nil, errors.New("agent Secret generation must be positive")
@@ -185,6 +202,7 @@ func (b *KubernetesBackend) secretFromRecord(record SecretRecord) (*corev1.Secre
 	}
 	data["agent-name"] = []byte(record.AgentName)
 	data["display-name"] = []byte(record.DisplayName)
+	data["avatar-url"] = []byte(record.AvatarURL)
 	data["mas-user-id"] = []byte(record.MASUserID)
 	data["session-id"] = []byte(record.SessionID)
 	data["generation"] = []byte(strconv.Itoa(record.Generation))
@@ -198,7 +216,7 @@ func (b *KubernetesBackend) secretFromRecord(record SecretRecord) (*corev1.Secre
 	}, nil
 }
 
-func recordFromSecret(secret *corev1.Secret) (SecretRecord, error) {
+func (b *KubernetesBackend) recordFromSecret(secret *corev1.Secret) (SecretRecord, error) {
 	if secret == nil || secret.Labels[secretPartOfLabel] != "matrix-agent-manager" || secret.Labels[agentLabel] == "" {
 		return SecretRecord{}, errors.New("Secret is not a Matrix Agent Manager record")
 	}
@@ -215,6 +233,10 @@ func recordFromSecret(secret *corev1.Secret) (SecretRecord, error) {
 	}
 	if string(data["mas-user-id"]) == "" || string(data["display-name"]) == "" {
 		return SecretRecord{}, errors.New("agent Secret is missing required identity metadata")
+	}
+	avatarURL := string(data["avatar-url"])
+	if err := validateAvatarURLForServer(avatarURL, b.serverName); err != nil {
+		return SecretRecord{}, fmt.Errorf("agent Secret has invalid avatar URL: %w", err)
 	}
 	if len(data["display-name"]) > 256 {
 		return SecretRecord{}, errors.New("agent Secret display name exceeds 256 bytes")
@@ -244,6 +266,7 @@ func recordFromSecret(secret *corev1.Secret) (SecretRecord, error) {
 	return SecretRecord{
 		AgentName:       agentName,
 		DisplayName:     string(data["display-name"]),
+		AvatarURL:       avatarURL,
 		MASUserID:       string(data["mas-user-id"]),
 		SessionID:       string(data["session-id"]),
 		AccessToken:     string(data["access-token"]),
@@ -257,5 +280,5 @@ func recordFromSecret(secret *corev1.Secret) (SecretRecord, error) {
 
 // MarshalMetadata is used by audit/UI layers and deliberately excludes token data.
 func MarshalMetadata(record SecretRecord) ([]byte, error) {
-	return json.Marshal(Result{AgentName: record.AgentName, DisplayName: record.DisplayName, MASUserID: record.MASUserID, SessionID: record.SessionID, Generation: record.Generation, Status: record.Status})
+	return json.Marshal(Result{AgentName: record.AgentName, DisplayName: record.DisplayName, AvatarURL: record.AvatarURL, MASUserID: record.MASUserID, SessionID: record.SessionID, Generation: record.Generation, Status: record.Status})
 }

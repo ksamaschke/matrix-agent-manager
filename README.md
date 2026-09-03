@@ -19,6 +19,8 @@ lifecycle management:
 - named agent creation and metadata-only listing;
 - one-time token delivery on creation and rotation;
 - token rotation, explicit revocation, deactivation, and removal;
+- E2EE recovery: one action that rotates the agent's MAS session and reports the
+  agent device's state on the homeserver (`POST /api/agents/{name}/recover`);
 - MAS user/session cleanup with bounded active-session enumeration;
 - Matrix display-name and avatar synchronization through explicit deployment-supplied endpoint templates;
 - Kubernetes Secret persistence with namespace-scoped RBAC;
@@ -31,6 +33,7 @@ The optional operator/CRD is not part of this API-based MVP.
 ## Guides
 
 - [Hermes Agent on macOS with Matrix E2EE](docs/macos-hermes-matrix-e2ee.md) — native Apple Silicon fix (libolm patch + local wheel build) and the Docker proxy-mode alternative, with credential hardening and crypto-store handling.
+- [Agent E2EE recovery](docs/agent-e2ee-recovery.md) — the server-side recovery action, what it reports, and the host-side boundary it does not cross.
 
 ## Local development
 

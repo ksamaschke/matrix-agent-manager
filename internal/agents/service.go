@@ -76,6 +76,22 @@ type SecretBackend interface {
 	ListAgents(context.Context) ([]SecretRecord, error)
 }
 
+// RecoveryClient performs Matrix-server-side E2EE health checks for an agent
+// device using its access token. It never stores or returns key material.
+type RecoveryClient interface {
+	// CheckDevice reports whether the given device identity is known and
+	// usable for the authenticated agent on the homeserver.
+	CheckDevice(ctx context.Context, accessToken, userID, deviceID string) (DeviceStatus, error)
+}
+
+// DeviceStatus describes the homeserver-side view of one agent device.
+type DeviceStatus struct {
+	DeviceID  string `json:"device_id"`
+	Known     bool   `json:"known"`
+	Verified  bool   `json:"verified"`
+	KeysMatch bool   `json:"keys_match"`
+}
+
 type ProfileProvisioner interface {
 	SetDisplayName(context.Context, string, string, string) error
 }
@@ -95,16 +111,18 @@ type ServiceConfig struct {
 	MatrixServerName     string
 	ProfileProvisioner   ProfileProvisioner
 	AvatarProvisioner    AvatarProvisioner
+	RecoveryClient       RecoveryClient
 }
 
 type Service struct {
-	mas     MASClient
-	secrets SecretBackend
-	profile ProfileProvisioner
-	avatar  AvatarProvisioner
-	config  ServiceConfig
-	now     func() time.Time
-	locks   sync.Map
+	mas      MASClient
+	secrets  SecretBackend
+	profile  ProfileProvisioner
+	avatar   AvatarProvisioner
+	recovery RecoveryClient
+	config   ServiceConfig
+	now      func() time.Time
+	locks    sync.Map
 }
 
 type CreateRequest struct {
@@ -130,8 +148,17 @@ type UnmanagedResult struct {
 	DeactivatedAt *string `json:"deactivated_at,omitempty"`
 }
 
+// RecoveryResult is returned by Recover. The one-time token is intentionally
+// omitted — the rotated credential lives only in the secret backend.
+type RecoveryResult struct {
+	AgentName  string       `json:"agent_name"`
+	Generation int          `json:"generation"`
+	Status     Status       `json:"status"`
+	Device     DeviceStatus `json:"device"`
+}
+
 func NewService(client MASClient, secrets SecretBackend, config ServiceConfig) *Service {
-	return &Service{mas: client, secrets: secrets, profile: config.ProfileProvisioner, avatar: config.AvatarProvisioner, config: config, now: time.Now}
+	return &Service{mas: client, secrets: secrets, profile: config.ProfileProvisioner, avatar: config.AvatarProvisioner, recovery: config.RecoveryClient, config: config, now: time.Now}
 }
 
 func (s *Service) withAgentLock(name string, fn func() (Result, error)) (Result, error) {
@@ -427,6 +454,41 @@ func (s *Service) Rotate(ctx context.Context, name string) (Result, error) {
 		}
 		return resultFromRecord(updated, true), nil
 	})
+}
+
+// Recover performs a full MAS/Matrix-server-side recovery cycle for an agent:
+// it rotates the MAS personal session (fresh token), persists the replacement
+// in the secret backend, and checks the device identity on the homeserver.
+// It deliberately never touches the agent host; the host-side consumer picks
+// up the rotated secret through its own approved mechanism.
+func (s *Service) Recover(ctx context.Context, name string) (RecoveryResult, error) {
+	rotated, err := s.Rotate(ctx, name)
+	if err != nil {
+		return RecoveryResult{}, fmt.Errorf("rotate agent session: %w", err)
+	}
+	result := RecoveryResult{AgentName: rotated.AgentName, Generation: rotated.Generation, Status: rotated.Status}
+	if s.recovery == nil {
+		result.Device = DeviceStatus{DeviceID: deviceIDForName(s.config.DeviceIDTemplate, name)}
+		return result, nil
+	}
+	userID, err := s.matrixUserID(name)
+	if err != nil {
+		return result, fmt.Errorf("resolve Matrix user ID: %w", err)
+	}
+	deviceID := deviceIDForName(s.config.DeviceIDTemplate, name)
+	status, err := s.recovery.CheckDevice(ctx, rotated.OneTimeToken, userID, deviceID)
+	if err != nil {
+		return result, fmt.Errorf("check device on homeserver: %w", err)
+	}
+	result.Device = status
+	return result, nil
+}
+
+func deviceIDForName(template, name string) string {
+	if strings.Count(template, "{agent_name}") != 1 {
+		return ""
+	}
+	return strings.Replace(template, "{agent_name}", name, 1)
 }
 
 // Revoke invalidates every active personal session but keeps the MAS account and

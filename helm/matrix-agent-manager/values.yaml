@@ -75,6 +75,7 @@ config:
     avatarURLTemplate: ""
     mediaUploadURL: ""
     mediaThumbnailURLTemplate: ""
+    clientServerBaseURL: ""
   secretBackend:
     type: kubernetes
     namespace: ""

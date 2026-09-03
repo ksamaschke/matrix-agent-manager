@@ -79,6 +79,12 @@ func main() {
 	if err != nil {
 		fatal("initialize Matrix profile client", err)
 	}
+	recoveryClient, err := matrix.NewRecoveryClient(matrix.RecoveryClientConfig{
+		HomeserverBaseURL: cfg.MatrixHomeserverBaseURL,
+	}, &http.Client{Timeout: 15 * time.Second})
+	if err != nil {
+		fatal("initialize Matrix recovery client", err)
+	}
 	kubeConfig, err := rest.InClusterConfig()
 	if err != nil {
 		fatal("load in-cluster Kubernetes configuration", err)
@@ -100,6 +106,7 @@ func main() {
 		MatrixServerName:     cfg.MatrixServerName,
 		ProfileProvisioner:   profileClient,
 		AvatarProvisioner:    profileClient,
+		RecoveryClient:       recoveryClient,
 	})
 	httpServer, err := httpapi.NewServer(auth, service, httpapi.ServerConfig{
 		AdminRoles:   cfg.OIDCAdminRoles,

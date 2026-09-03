@@ -57,6 +57,9 @@ func (f *fakeAgentService) GetAvatar(context.Context, string) ([]byte, string, e
 func (f *fakeAgentService) Rotate(context.Context, string) (agents.Result, error) {
 	return agents.Result{AgentName: "codex", OneTimeToken: "synthetic-rotated-token", Generation: 2, Status: agents.StatusActive}, nil
 }
+func (f *fakeAgentService) Recover(context.Context, string) (agents.RecoveryResult, error) {
+	return agents.RecoveryResult{AgentName: "codex", Generation: 3, Status: agents.StatusActive, Device: agents.DeviceStatus{DeviceID: "agent-codex", Known: true, KeysMatch: true}}, nil
+}
 func (f *fakeAgentService) Deactivate(context.Context, string) (agents.Result, error) {
 	return agents.Result{AgentName: "codex", Status: agents.StatusDeactivated}, nil
 }

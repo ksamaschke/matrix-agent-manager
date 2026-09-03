@@ -552,3 +552,122 @@ func TestRemoveRevokesDeactivatesAndDeletesSecret(t *testing.T) {
 		t.Fatalf("secret after remove = %v, want not found", err)
 	}
 }
+
+type fakeRecovery struct {
+	calls    []string
+	status   DeviceStatus
+	err      error
+	lastUser string
+}
+
+func (f *fakeRecovery) CheckDevice(_ context.Context, accessToken, userID, deviceID string) (DeviceStatus, error) {
+	f.calls = append(f.calls, accessToken+"|"+userID+"|"+deviceID)
+	f.lastUser = userID
+	if f.err != nil {
+		return DeviceStatus{}, f.err
+	}
+	status := f.status
+	status.DeviceID = deviceID
+	return status, nil
+}
+
+func newRecoveryTestService() (*Service, *fakeMAS, *memorySecrets, *fakeRecovery) {
+	masClient := &fakeMAS{}
+	secrets := newMemorySecrets()
+	recovery := &fakeRecovery{status: DeviceStatus{Known: true, KeysMatch: true}}
+	service := NewService(masClient, secrets, ServiceConfig{
+		SecretNamePrefix:     "synthetic-agent",
+		TokenScope:           "openid urn:matrix:client:api:* urn:matrix:client:device:{device_id}",
+		TokenExpiry:          time.Hour,
+		DeviceIDTemplate:     "agent-{agent_name}",
+		MatrixUserIDTemplate: "@{localpart}:homeserver.test",
+		RecoveryClient:       recovery,
+	})
+	return service, masClient, secrets, recovery
+}
+
+func TestRecoverRotatesSessionAndChecksDevice(t *testing.T) {
+	service, _, secrets, recovery := newRecoveryTestService()
+	if _, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	before, err := secrets.GetAgent(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+
+	result, err := service.Recover(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("Recover() error = %v", err)
+	}
+	if result.Generation <= before.Generation {
+		t.Fatalf("expected generation to advance past %d, got %d", before.Generation, result.Generation)
+	}
+	after, err := secrets.GetAgent(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+	if after.AccessToken == before.AccessToken {
+		t.Fatal("expected recovery to persist a rotated access token")
+	}
+	if len(recovery.calls) != 1 {
+		t.Fatalf("expected exactly one device check, got %#v", recovery.calls)
+	}
+	if recovery.lastUser != "@codex:homeserver.test" {
+		t.Fatalf("device check used user ID %q", recovery.lastUser)
+	}
+	if result.Device.DeviceID != "agent-codex" || !result.Device.Known || !result.Device.KeysMatch {
+		t.Fatalf("unexpected device status %+v", result.Device)
+	}
+}
+
+func TestRecoverWithoutRecoveryClientStillRotates(t *testing.T) {
+	service, _, secrets, _ := newRecoveryTestService()
+	service.recovery = nil
+	if _, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	before, err := secrets.GetAgent(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+	result, err := service.Recover(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("Recover() error = %v", err)
+	}
+	if result.Generation <= before.Generation {
+		t.Fatal("expected rotation even without a recovery client")
+	}
+	if result.Device.DeviceID != "agent-codex" {
+		t.Fatalf("expected device ID to be derived, got %q", result.Device.DeviceID)
+	}
+}
+
+func TestRecoverSurfacesDeviceCheckFailureAfterRotation(t *testing.T) {
+	service, _, secrets, recovery := newRecoveryTestService()
+	if _, err := service.Create(context.Background(), CreateRequest{AgentName: "codex", DisplayName: "Codex"}); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	before, err := secrets.GetAgent(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+	recovery.err = errors.New("homeserver unreachable")
+	if _, err := service.Recover(context.Background(), "codex"); err == nil {
+		t.Fatal("expected device check failure to surface")
+	}
+	after, err := secrets.GetAgent(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+	if after.Generation <= before.Generation {
+		t.Fatal("rotation must persist even when the follow-up device check fails")
+	}
+}
+
+func TestRecoverRejectsUnknownAgent(t *testing.T) {
+	service, _, _, _ := newRecoveryTestService()
+	if _, err := service.Recover(context.Background(), "missing"); err == nil {
+		t.Fatal("expected error for unknown agent")
+	}
+}

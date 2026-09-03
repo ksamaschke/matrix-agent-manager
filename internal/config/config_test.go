@@ -56,6 +56,7 @@ func TestLoadUsesConfiguredValuesWithoutLoggingSecrets(t *testing.T) {
 		"AGENT_MANAGER_MATRIX_AVATAR_URL_TEMPLATE":          "https://matrix.example.invalid/_matrix/client/v3/profile/{user_id}/avatar_url",
 		"AGENT_MANAGER_MATRIX_MEDIA_UPLOAD_URL":             "https://matrix.example.invalid/_matrix/media/v3/upload",
 		"AGENT_MANAGER_MATRIX_MEDIA_THUMBNAIL_URL_TEMPLATE": "https://matrix.example.invalid/_matrix/client/v1/media/thumbnail/{server_name}/{media_id}",
+		"AGENT_MANAGER_MATRIX_HOMESERVER_BASE_URL":          "https://matrix.example.invalid",
 		"AGENT_MANAGER_SECRET_BACKEND":                      "kubernetes",
 		"AGENT_MANAGER_SECRET_NAMESPACE":                    "agent-manager",
 		"AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX":            "matrix-agent",

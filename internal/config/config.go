@@ -44,6 +44,7 @@ type Config struct {
 	MatrixAvatarURLTemplate         string
 	MatrixMediaUploadURL            string
 	MatrixMediaThumbnailURLTemplate string
+	MatrixHomeserverBaseURL         string
 
 	SecretBackend           string
 	SecretNamespace         string
@@ -89,6 +90,7 @@ func Load(get Lookup) (Config, error) {
 		MatrixAvatarURLTemplate:         get("AGENT_MANAGER_MATRIX_AVATAR_URL_TEMPLATE"),
 		MatrixMediaUploadURL:            get("AGENT_MANAGER_MATRIX_MEDIA_UPLOAD_URL"),
 		MatrixMediaThumbnailURLTemplate: get("AGENT_MANAGER_MATRIX_MEDIA_THUMBNAIL_URL_TEMPLATE"),
+		MatrixHomeserverBaseURL:         get("AGENT_MANAGER_MATRIX_HOMESERVER_BASE_URL"),
 		SecretBackend:                   valueOr(get("AGENT_MANAGER_SECRET_BACKEND"), "memory"),
 		SecretNamespace:                 get("AGENT_MANAGER_SECRET_NAMESPACE"),
 		AgentSecretNamePrefix:           get("AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX"),
@@ -139,6 +141,7 @@ func Load(get Lookup) (Config, error) {
 		"AGENT_MANAGER_MATRIX_AVATAR_URL_TEMPLATE":          cfg.MatrixAvatarURLTemplate,
 		"AGENT_MANAGER_MATRIX_MEDIA_UPLOAD_URL":             cfg.MatrixMediaUploadURL,
 		"AGENT_MANAGER_MATRIX_MEDIA_THUMBNAIL_URL_TEMPLATE": cfg.MatrixMediaThumbnailURLTemplate,
+		"AGENT_MANAGER_MATRIX_HOMESERVER_BASE_URL":          cfg.MatrixHomeserverBaseURL,
 		"AGENT_MANAGER_SECRET_BACKEND":                      cfg.SecretBackend,
 		"AGENT_MANAGER_SECRET_NAMESPACE":                    cfg.SecretNamespace,
 		"AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX":            cfg.AgentSecretNamePrefix,
@@ -181,6 +184,9 @@ func Load(get Lookup) (Config, error) {
 		}
 	}
 	if err := validateAbsoluteHTTPSURL("AGENT_MANAGER_MATRIX_MEDIA_UPLOAD_URL", cfg.MatrixMediaUploadURL); err != nil {
+		return Config{}, err
+	}
+	if err := validateAbsoluteHTTPSURL("AGENT_MANAGER_MATRIX_HOMESERVER_BASE_URL", cfg.MatrixHomeserverBaseURL); err != nil {
 		return Config{}, err
 	}
 	if err := validateMediaThumbnailTemplate(cfg.MatrixMediaThumbnailURLTemplate); err != nil {

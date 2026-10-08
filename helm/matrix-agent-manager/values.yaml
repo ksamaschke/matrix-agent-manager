@@ -99,11 +99,18 @@ secretRefs:
     name: matrix-agent-manager-session
     key: session-key
 
+# MatrixAgent operator: reconciles MatrixAgent resources in the listed
+# namespaces (accounts, token rotation, token Secret in the namespace).
+# The CRD ships in crds/ and is installed by Helm/Argo CD.
 operator:
   enabled: false
-
-crds:
-  install: false
+  # Namespaces allowed to declare Matrix agents. RBAC is granted only there.
+  namespaces: []
+  intervalSeconds: 30
+  # Rotate tokens older than this; must be below agent.tokenExpirySeconds.
+  rotateAfterSeconds: 0
+  # Written to the token Secret as "homeserver" for consumers; optional.
+  homeserverURL: ""
 
 networkPolicy:
   enabled: false

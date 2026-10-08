@@ -13,7 +13,9 @@ import (
 	"github.com/ksamaschke/matrix-agent-manager/internal/mas"
 	"github.com/ksamaschke/matrix-agent-manager/internal/matrix"
 	"github.com/ksamaschke/matrix-agent-manager/internal/oidcauth"
+	"github.com/ksamaschke/matrix-agent-manager/internal/operator"
 	"github.com/ksamaschke/matrix-agent-manager/internal/session"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -108,6 +110,26 @@ func main() {
 		AvatarProvisioner:    profileClient,
 		RecoveryClient:       recoveryClient,
 	})
+	// The operator runs in this process so it shares the service's per-agent
+	// locks with the dashboard API.
+	if len(cfg.OperatorNamespaces) > 0 {
+		dynClient, err := dynamic.NewForConfig(kubeConfig)
+		if err != nil {
+			fatal("initialize dynamic Kubernetes client", err)
+		}
+		op, err := operator.New(dynClient, kubeClient, service, backend, operator.Config{
+			Namespaces:           cfg.OperatorNamespaces,
+			Interval:             time.Duration(cfg.OperatorIntervalSeconds) * time.Second,
+			RotateAfter:          time.Duration(cfg.OperatorRotateAfterSeconds) * time.Second,
+			HomeserverURL:        cfg.OperatorPublicHomeserverURL,
+			MatrixUserIDTemplate: cfg.MatrixUserIDTemplate,
+			DeviceIDTemplate:     cfg.AgentDeviceIDTemplate,
+		})
+		if err != nil {
+			fatal("initialize MatrixAgent operator", err)
+		}
+		go op.Run(context.Background())
+	}
 	httpServer, err := httpapi.NewServer(auth, service, httpapi.ServerConfig{
 		AdminRoles:   cfg.OIDCAdminRoles,
 		ViewerRoles:  cfg.OIDCViewerRoles,

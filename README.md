@@ -28,7 +28,7 @@ lifecycle management:
 
 The product remains deployment-neutral. Hostnames, Keycloak details, MAS
 endpoints, namespaces, and Secret references belong in deployment overlays.
-The optional operator/CRD is not part of this API-based MVP.
+Agents can also be declared as `MatrixAgent` resources; see [Declarative agents](#declarative-agents-matrixagent).
 
 ## Guides
 
@@ -86,6 +86,35 @@ and `{media_id}`.
 
 Do not place secret values in environment variables, source code, Helm values,
 CRD status, logs, or Git. Use mounted files or a supported secret backend.
+
+## Declarative agents (MatrixAgent)
+
+With `operator.enabled`, the manager also reconciles `MatrixAgent` resources
+(`matrix-agent-manager.io/v1alpha1`) in the namespaces listed in
+`operator.namespaces`. RBAC is granted only in those namespaces.
+
+```yaml
+apiVersion: matrix-agent-manager.io/v1alpha1
+kind: MatrixAgent
+metadata:
+  name: lead
+  namespace: tenant-a
+spec:
+  agentName: lead              # Matrix localpart, defaults to metadata.name
+  displayName: Lead Agent
+  secretName: lead-matrix      # receives access-token, user-id, device-id, homeserver
+  restartDeployments: [lead]   # pods restarted when the token changes
+  deletionPolicy: Retain       # or Deactivate
+  # rotationToken: any-new-value   rotates the token once
+  # adoptExisting: true            take over an existing account/Secret
+```
+
+The operator creates the account (or adopts it with `adoptExisting`), rotates
+the token after `operator.rotateAfterSeconds` or when `rotationToken` changes,
+revokes the previous session, and writes the token Secret owned by the
+resource. An agent name can be claimed by one resource only; later claims end
+in phase `Conflict`. Status never contains token material. The operator runs in
+the manager process and shares its per-agent locks with the dashboard API.
 
 ## License
 

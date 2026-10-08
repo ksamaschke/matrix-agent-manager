@@ -42,3 +42,9 @@ data:
   AGENT_MANAGER_AGENT_TOKEN_SCOPE: {{ .Values.agent.tokenScope | quote }}
   AGENT_MANAGER_AGENT_DEVICE_ID_TEMPLATE: {{ .Values.agent.deviceIDTemplate | quote }}
   AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS: {{ .Values.agent.tokenExpirySeconds | int | quote }}
+  {{- if .Values.operator.enabled }}
+  AGENT_MANAGER_OPERATOR_NAMESPACES: {{ join "," .Values.operator.namespaces | quote }}
+  AGENT_MANAGER_OPERATOR_INTERVAL_SECONDS: {{ .Values.operator.intervalSeconds | int | quote }}
+  AGENT_MANAGER_OPERATOR_ROTATE_AFTER_SECONDS: {{ .Values.operator.rotateAfterSeconds | int | quote }}
+  AGENT_MANAGER_OPERATOR_HOMESERVER_URL: {{ .Values.operator.homeserverURL | quote }}
+  {{- end }}

@@ -1,0 +1,45 @@
+{{- if and .Values.operator.enabled .Values.rbac.create }}
+{{- range .Values.operator.namespaces }}
+---
+# MatrixAgent operator access in watched namespace {{ . }}.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "matrix-agent-manager.fullname" $ }}-operator
+  namespace: {{ . }}
+  labels:
+    {{- include "matrix-agent-manager.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: ["matrix-agent-manager.io"]
+    resources: ["matrixagents"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["matrix-agent-manager.io"]
+    resources: ["matrixagents/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["deletecollection"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "matrix-agent-manager.fullname" $ }}-operator
+  namespace: {{ . }}
+  labels:
+    {{- include "matrix-agent-manager.labels" $ | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "matrix-agent-manager.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "matrix-agent-manager.fullname" $ }}-operator
+{{- end }}
+{{- end }}

@@ -52,6 +52,12 @@ type Config struct {
 	AgentTokenScope         string
 	AgentDeviceIDTemplate   string
 	AgentTokenExpirySeconds uint32
+
+	// MatrixAgent operator (optional). Empty namespaces disable it.
+	OperatorNamespaces          []string
+	OperatorIntervalSeconds     uint32
+	OperatorRotateAfterSeconds  uint32
+	OperatorPublicHomeserverURL string
 }
 
 // Load reads and validates configuration from environment variables.
@@ -96,6 +102,21 @@ func Load(get Lookup) (Config, error) {
 		AgentSecretNamePrefix:           get("AGENT_MANAGER_AGENT_SECRET_NAME_PREFIX"),
 		AgentTokenScope:                 get("AGENT_MANAGER_AGENT_TOKEN_SCOPE"),
 		AgentDeviceIDTemplate:           get("AGENT_MANAGER_AGENT_DEVICE_ID_TEMPLATE"),
+		OperatorNamespaces:              splitCSV(get("AGENT_MANAGER_OPERATOR_NAMESPACES")),
+		OperatorPublicHomeserverURL:     get("AGENT_MANAGER_OPERATOR_HOMESERVER_URL"),
+		OperatorIntervalSeconds:         30,
+	}
+	for name, target := range map[string]*uint32{
+		"AGENT_MANAGER_OPERATOR_INTERVAL_SECONDS":     &cfg.OperatorIntervalSeconds,
+		"AGENT_MANAGER_OPERATOR_ROTATE_AFTER_SECONDS": &cfg.OperatorRotateAfterSeconds,
+	} {
+		if raw := get(name); raw != "" {
+			value, err := strconv.ParseUint(raw, 10, 32)
+			if err != nil {
+				return Config{}, fmt.Errorf("%s must be an unsigned integer: %w", name, err)
+			}
+			*target = uint32(value)
+		}
 	}
 	if raw := get("AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS"); raw != "" {
 		seconds, err := strconv.ParseUint(raw, 10, 32)
@@ -215,6 +236,20 @@ func Load(get Lookup) (Config, error) {
 	}
 	if !cfg.CookieSecure {
 		return Config{}, errors.New("AGENT_MANAGER_COOKIE_SECURE must be true in production")
+	}
+	if len(cfg.OperatorNamespaces) > 0 {
+		if cfg.OperatorIntervalSeconds == 0 {
+			return Config{}, errors.New("AGENT_MANAGER_OPERATOR_INTERVAL_SECONDS must be positive")
+		}
+		// Rotate well before MAS expires the token.
+		if cfg.OperatorRotateAfterSeconds == 0 || cfg.OperatorRotateAfterSeconds >= cfg.AgentTokenExpirySeconds {
+			return Config{}, errors.New("AGENT_MANAGER_OPERATOR_ROTATE_AFTER_SECONDS must be positive and below AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS")
+		}
+		if cfg.OperatorPublicHomeserverURL != "" {
+			if err := validateAbsoluteHTTPSURL("AGENT_MANAGER_OPERATOR_HOMESERVER_URL", cfg.OperatorPublicHomeserverURL); err != nil {
+				return Config{}, err
+			}
+		}
 	}
 	return cfg, nil
 }

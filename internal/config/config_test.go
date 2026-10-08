@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLoadRejectsMissingProductionConfiguration(t *testing.T) {
 	env := map[string]string{
@@ -30,8 +33,8 @@ func TestLoadAcceptsDevelopmentConfigurationWithoutExternalServices(t *testing.T
 	}
 }
 
-func TestLoadUsesConfiguredValuesWithoutLoggingSecrets(t *testing.T) {
-	env := map[string]string{
+func productionEnv() map[string]string {
+	return map[string]string{
 		"AGENT_MANAGER_ENV":                                 "production",
 		"AGENT_MANAGER_OIDC_ISSUER_URL":                     "https://idp.example.invalid/realms/example",
 		"AGENT_MANAGER_OIDC_CLIENT_ID":                      "agent-manager",
@@ -64,6 +67,10 @@ func TestLoadUsesConfiguredValuesWithoutLoggingSecrets(t *testing.T) {
 		"AGENT_MANAGER_AGENT_DEVICE_ID_TEMPLATE":            "agent-{agent_name}",
 		"AGENT_MANAGER_AGENT_TOKEN_EXPIRY_SECONDS":          "2592000",
 	}
+}
+
+func TestLoadUsesConfiguredValuesWithoutLoggingSecrets(t *testing.T) {
+	env := productionEnv()
 
 	cfg, err := Load(envLookup(env))
 	if err != nil {
@@ -75,6 +82,56 @@ func TestLoadUsesConfiguredValuesWithoutLoggingSecrets(t *testing.T) {
 	if cfg.MASClientID != "agent-manager-admin" {
 		t.Fatalf("MASClientID = %q, want agent-manager-admin", cfg.MASClientID)
 	}
+}
+
+func TestLoadOperatorSettings(t *testing.T) {
+	base := productionEnv()
+	cases := []struct {
+		name    string
+		extra   map[string]string
+		wantErr string
+	}{
+		{"disabled without namespaces", map[string]string{}, ""},
+		{"enabled", map[string]string{"AGENT_MANAGER_OPERATOR_NAMESPACES": "tenant-a, tenant-b", "AGENT_MANAGER_OPERATOR_ROTATE_AFTER_SECONDS": "1209600", "AGENT_MANAGER_OPERATOR_HOMESERVER_URL": "https://matrix.example.invalid"}, ""},
+		{"rotation required", map[string]string{"AGENT_MANAGER_OPERATOR_NAMESPACES": "tenant-a"}, "ROTATE_AFTER"},
+		{"rotation before expiry", map[string]string{"AGENT_MANAGER_OPERATOR_NAMESPACES": "tenant-a", "AGENT_MANAGER_OPERATOR_ROTATE_AFTER_SECONDS": "2592000"}, "ROTATE_AFTER"},
+		{"https homeserver", map[string]string{"AGENT_MANAGER_OPERATOR_NAMESPACES": "tenant-a", "AGENT_MANAGER_OPERATOR_ROTATE_AFTER_SECONDS": "60", "AGENT_MANAGER_OPERATOR_HOMESERVER_URL": "http://matrix.example.invalid"}, "HOMESERVER_URL"},
+	}
+	for _, tc := range cases {
+		env := map[string]string{}
+		for k, v := range base {
+			env[k] = v
+		}
+		for k, v := range tc.extra {
+			env[k] = v
+		}
+		cfg, err := Load(envLookup(env))
+		if tc.wantErr == "" {
+			if err != nil {
+				t.Fatalf("%s: Load() error = %v", tc.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+			t.Fatalf("%s: error = %v, want %s", tc.name, err, tc.wantErr)
+		}
+		_ = cfg
+	}
+	cfg, _ := Load(envLookup(mergeEnv(base, cases[1].extra)))
+	if len(cfg.OperatorNamespaces) != 2 || cfg.OperatorNamespaces[1] != "tenant-b" || cfg.OperatorIntervalSeconds != 30 {
+		t.Fatalf("operator config = %#v", cfg.OperatorNamespaces)
+	}
+}
+
+func mergeEnv(a, b map[string]string) map[string]string {
+	out := map[string]string{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }
 
 func envLookup(values map[string]string) Lookup {
